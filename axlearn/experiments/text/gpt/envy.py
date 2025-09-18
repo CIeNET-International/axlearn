@@ -36,6 +36,7 @@ from axlearn.common.attention import (
     ScaleKey,
     ScaleQuery,
     TransformerLayer,
+    RematRegexSavePatterns,
 )
 from axlearn.common.base_layer import RematSpec
 from axlearn.common.config import TrainerConfigFn, config_for_function

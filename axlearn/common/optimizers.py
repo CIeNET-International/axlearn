@@ -38,7 +38,6 @@ import typing_extensions
 from absl import logging
 from jax import numpy as jnp
 
-# from jax._src.sharding_impls import TransferToMemoryKind
 from optax._src import numerics
 
 from axlearn.common import flax_struct, schedule
