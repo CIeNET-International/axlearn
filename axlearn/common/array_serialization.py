@@ -473,7 +473,6 @@ async def _async_deserialize(
     context = serialization.TS_CONTEXT
     if os.getenv("ENABLE_GCS_GRPC", "false") == "true":
         tensorstore_spec, context = use_gcs_grpc(tensorstore_spec)
-
     t = await ts.open(
         tensorstore_spec,
         open=True,

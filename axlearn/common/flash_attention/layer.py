@@ -414,7 +414,6 @@ class FlashBlockSizeModifier(ConfigModifier):
         cfg.visit(visit_fn=visit_fn, enter_fn=enter_fn)
         return cfg
 
-
 class BackendOverrideModifier(ConfigModifier):
     """Modifies the backend_overrides config of Flash Attention."""
 

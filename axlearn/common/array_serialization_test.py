@@ -483,7 +483,6 @@ class SerializerTest(parameterized.TestCase):
         devices = mesh_utils.create_device_mesh((8,))
         mesh = jax.sharding.Mesh(devices.reshape((4, 2)), ("x", "y"))
         sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec(None, "y"))
-
         arr = jax.device_put(single_device_arr, sharding)
 
         replica_count = _num_replicas_per_shard(arr)
@@ -504,7 +503,6 @@ class SerializerTest(parameterized.TestCase):
         devices = mesh_utils.create_device_mesh((8,))
         mesh = jax.sharding.Mesh(devices.reshape((4, 2)), ("x", "y"))
         sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec("x", "y"))
-
         arr = jax.device_put(single_device_arr, sharding)
 
         replica_count = _num_replicas_per_shard(arr)
@@ -563,7 +561,6 @@ class SerializerTest(parameterized.TestCase):
             _ShardInfo(data=data, index=index, slice_arg=None, replica_count=1).shard_coordinate(),
             expected,
         )
-
 
 if __name__ == "__main__":
     absltest.main()
