@@ -146,7 +146,7 @@ class TreeUtilsTest(TestCase):
         class MyEnum(str, enum.Enum):
             RED = "red"
 
-        self.assertEqual({MyEnum.RED: "red"}, tree_paths({MyEnum.RED: 3}))
+        self.assertEqual({MyEnum.RED: "MyEnum.RED"}, tree_paths({MyEnum.RED: 3}))
 
         # With is_leaf set.
         self.assertEqual(
