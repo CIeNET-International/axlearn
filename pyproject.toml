@@ -21,7 +21,7 @@ dependencies = [
 # Every time we upgrade JAX, we should try to bring the rest to the newest versions.
 core = [
     "absl-py==2.3.1",
-    "chex==0.1.91",
+    "chex==0.1.88",
     "importlab==0.8.1",  # breaks pytype on 0.8
     "jax==0.6.2",
     "jaxlib==0.6.2",
