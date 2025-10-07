@@ -54,7 +54,7 @@ class TrainerConfigTest(TestCase):
             visited = set()
             for axis in jax.tree_util.tree_leaves(
                 tuple(v)
-            ):  # Cast to tuple since PartitionSpec is a leaf.
+            ):  # Cast leaf PartitionSpec to tuple
                 self.assertNotIn(axis, visited)
                 visited.add(axis)
             self.assertGreater(len(visited), 0)
