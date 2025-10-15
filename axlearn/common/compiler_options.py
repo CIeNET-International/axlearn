@@ -163,7 +163,7 @@ def default_xla_options(
             megascale_grpc_enable_xor_tracer="false",
             megascale_debug_port="8081",
             # Observed a lot of deadline exceeded error. Default is 45s.
-            megascale_send_rpc_timeout="5m",
+            # megascale_send_rpc_timeout="5m",
         )
         # pytype: enable=wrong-arg-types
 
