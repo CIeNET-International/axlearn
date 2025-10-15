@@ -289,7 +289,8 @@ def get_trainer_kwargs(
 ) -> dict[str, Any]:
     """Construct default trainer kwargs given a model size."""
     tokens_per_batch = TOKENS_PER_BATCH[version]
-    max_step = TOTAL_TOKENS[version][model_size] // tokens_per_batch
+    # max_step = TOTAL_TOKENS[version][model_size] // tokens_per_batch
+    max_step = 200
     max_sequence_length = MAX_SEQUENCE_LENGTH[version]
     train_batch_size = tokens_per_batch // max_sequence_length
 
@@ -408,10 +409,12 @@ def get_trainer_kwargs(
                 shared_lm_head=True,
                 flash_attention=flash_attention,
             ),
+
             learner_kwargs=dict(peak_lr=3e-4, weight_decay=0.1),
             max_sequence_length=max_sequence_length,
-            train_batch_size=train_batch_size,
+            train_batch_size=128,
             max_step=max_step,
+            save_every_n_steps=50,
             mesh_shape=mesh_shape_from_axes(data=-1, fsdp=8),
             mesh_rules=(
                 # Step time:
@@ -504,7 +507,7 @@ def get_trainer_kwargs(
                         config_modifiers=[
                             MeshShapeModifier.default_config().set(
                                 # fsdp=8 is also ok, only 2% slower step time.
-                                mesh_shape=mesh_shape_from_axes(data=-1, fsdp=64)
+                                mesh_shape=mesh_shape_from_axes(data=1, fsdp=128)
                             ),
                             RematSpecModifier.default_config().set(
                                 remat_policies={

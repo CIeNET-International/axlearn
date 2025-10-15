@@ -1111,12 +1111,12 @@ class SpmdTrainer(Module):
             # Run the compiled function.
             self._trainer_state, outputs = compiled_train_step_fn(self.trainer_state, input_batch)
 
-        if self.step % 100 == 0 or 0 <= self.step <= 5:
-            self._step_log(
-                "loss=%s aux=%s",
-                outputs["loss"],
-                jax.tree.map(lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]),
-            )
+        # if self.step % 100 == 0 or 0 <= self.step <= 5:
+        self._step_log(
+            "loss=%s aux=%s",
+            outputs["loss"],
+            jax.tree.map(lambda x: x.item() if x.ndim == 0 else f"T{x.shape}", outputs["aux"]),
+        )
 
         self.summary_writer(self.step, {"loss": outputs["loss"], **outputs["summaries"]})
         # Aggregate summaries across evalers.
