@@ -727,7 +727,7 @@ def pytest_addoption_atomic(parser, option, **kwargs):
 def mock_trainer_config(
     input_config: InstantiableConfig,
     model_config: BaseModel.Config,
-    mesh_axis_names: Sequence[str] = ("data", "model"),
+    mesh_axis_names: Sequence[str] = ("fsdp", "model"),
 ) -> SpmdTrainer.Config:
     cfg = SpmdTrainer.default_config()
     cfg.name = "mock_trainer_config"

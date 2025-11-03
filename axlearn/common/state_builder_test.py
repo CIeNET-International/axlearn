@@ -315,7 +315,6 @@ class PosEmbeddingConverterTest(TestCase):
             strategy=strategy,
         )
         converter: PosEmbeddingConverter = cfg.instantiate(parent=None)
-
         converted_state = converter.source_to_target(source_state, target_state)
         self.assertEqual(
             (1, 512, 32),

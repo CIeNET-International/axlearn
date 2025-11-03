@@ -342,7 +342,7 @@ class T5EncoderDecoderModelTest(TestCase):
     def test_pjit(self):
         # A simple test to ensure a train step does not leak tracers.
         mesh_shape = (1, 1)
-        mesh_axes = ("data", "model")
+        mesh_axes = ("fsdp", "model")
         devices = mesh_utils.create_device_mesh(mesh_shape)
         with jax.checking_leaks(), jax.sharding.Mesh(devices, mesh_axes):
             vocab_size = 6
