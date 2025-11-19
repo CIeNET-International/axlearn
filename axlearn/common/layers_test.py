@@ -383,7 +383,6 @@ class LayerTest(TestCase):
                 )
                 square_sum = jnp.sum(
                     outputs_by_group**2 * expanded_mask, axis=reduction_axis, keepdims=True
-                )
                 square_count = jnp.sum(
                     jnp.ones_like(outputs_by_group) * expanded_mask,
                     axis=reduction_axis,
