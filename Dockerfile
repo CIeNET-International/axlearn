@@ -97,7 +97,7 @@ ARG EXTRAS=
 COPY pyproject.toml README.md /root/
 RUN uv pip install -qq --prerelease=allow .[core,tpu] && uv cache clean
 RUN if [ -n "$EXTRAS" ]; then uv pip install -qq .[$EXTRAS] && uv cache clean; fi
-RUN uv pip install -qq --no-deps libtpu==0.0.27 && uv cache clean
+RUN uv pip install -qq --no-deps libtpu==0.0.29 && uv cache clean
 COPY . .
 
 ################################################################################
