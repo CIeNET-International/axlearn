@@ -1,4 +1,5 @@
-""" k8s service module."""
+"""k8s service module."""
+
 import copy
 import logging
 from typing import Any, Optional
@@ -180,7 +181,7 @@ class LWSService(Service):
                 name=self.name,
                 owner_references=[
                     k8s.client.V1OwnerReference(
-                        api_version=f"{api_kwargs['group']}/{api_kwargs['version']}",
+                        api_version=f"{api_kwargs["group"]}/{api_kwargs["version"]}",
                         kind="LeaderWorkerSet",
                         name=lws_name,  ### self.name is a name+"-service"
                         uid=lws["metadata"]["uid"],

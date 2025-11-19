@@ -37,7 +37,8 @@ import optax
 import typing_extensions
 from absl import logging
 from jax import numpy as jnp
-from jax._src.sharding_impls import TransferToMemoryKind
+
+# from jax._src.sharding_impls import TransferToMemoryKind
 from optax._src import numerics
 
 from axlearn.common import flax_struct, schedule
@@ -2033,9 +2034,9 @@ def adastar_optimizer(
                 params, per_param_scale=weight_decay_per_param_scale
             )
             updates2 = jax.tree.map(
-                lambda u, p, wds: None
-                if u is None
-                else _update2(u, param=p, weight_decay_scale=wds),
+                lambda u, p, wds: (
+                    None if u is None else _update2(u, param=p, weight_decay_scale=wds)
+                ),
                 updates,
                 params,
                 weight_decay_scales,
@@ -2143,10 +2144,11 @@ def offload_optimizer(
         # memory spike due the the temporary state in HBM, but the spike is much less than the full
         # memory usage of all states. Moreover, when the optimizer is run, all activations are
         # released, so we have less memory pressure at that point in time.
+        # memory_kind = sharding.memory_kind(dst)
         return jax.tree.map(
             lambda path, tensor: (
-                jax.device_put(tensor, TransferToMemoryKind(dst))
-                if re.fullmatch(pattern, path)
+                jax.device_put(tensor, tensor.sharding.with_memory_kind(dst))
+                if re.fullmatch(pattern, path) and hasattr(tensor, "sharding")
                 else tensor
             ),
             tree_paths(state),

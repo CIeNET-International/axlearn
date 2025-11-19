@@ -364,7 +364,7 @@ def deserialize_jobspec(f: Union[str, IO]) -> JobSpec:
             env_vars=data.get("env_vars", None),
             metadata=JobMetadata(**data["metadata"]),
         )
-    raise ValidationError(f"Unsupported version: {data['version']}")
+    raise ValidationError(f"Unsupported version: {data["version"]}")
 
 
 # TODO(clopeznataren): Refactor into JobValidator

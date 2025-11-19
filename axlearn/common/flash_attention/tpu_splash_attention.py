@@ -295,8 +295,7 @@ def _splash_attention_forward(
     attn_logits_soft_cap: float | None = None,
     dropout_rate: float = 0.0,
     prng_key: jax.Array | None = None,
-) -> jax.Array:
-    ...
+) -> jax.Array: ...
 
 
 @overload
@@ -319,8 +318,7 @@ def _splash_attention_forward(
     attn_logits_soft_cap: float | None = None,
     dropout_rate: float = 0.0,
     prng_key: jax.Array | None = None,
-) -> SplashCustomReturnType:
-    ...
+) -> SplashCustomReturnType: ...
 
 
 # TODO: Try to reduce positional arguments
@@ -611,7 +609,7 @@ def _splash_attention_forward(
                 out_specs=out_specs,
                 grid=grid,
             ),
-            compiler_params=pltpu.TPUCompilerParams(
+            compiler_params=pltpu.CompilerParams(
                 dimension_semantics=("parallel", "arbitrary", "arbitrary"),
             ),
             out_shape=out_shapes,
@@ -728,7 +726,10 @@ def _splash_attention_fwd(
     dropout_rate: float = 0.0,
     prng_key: jax.Array | None = None,
     interpret: bool = False,
-) -> tuple[tuple[jax.Array], SplashResidualsType,]:
+) -> tuple[
+    tuple[jax.Array],
+    SplashResidualsType,
+]:
     if save_residuals:
         raise NotImplementedError("Higher-order AD not supported")
 
@@ -1084,7 +1085,7 @@ def _splash_attention_bwd_dq(
                 grid=grid,
             ),
             out_shape=out_shapes,
-            compiler_params=pltpu.TPUCompilerParams(
+            compiler_params=pltpu.CompilerParams(
                 dimension_semantics=("arbitrary", "arbitrary", "arbitrary"),
             ),
             name=kernel_name,
@@ -1675,7 +1676,7 @@ def _splash_attention_bwd_dkv(
             #    megacore
             # 2) for heads, we are reducing over heads
             # 3) for q_seq_len, we are reducing over it to compute dkv
-            compiler_params=pltpu.TPUCompilerParams(
+            compiler_params=pltpu.CompilerParams(
                 dimension_semantics=("arbitrary", "arbitrary", "arbitrary"),
             ),
             name=kernel_name,
@@ -2150,7 +2151,7 @@ def get_dropout_mask(
                 out_specs=out_specs,
                 grid=grid,
             ),
-            compiler_params=pltpu.TPUCompilerParams(
+            compiler_params=pltpu.CompilerParams(
                 dimension_semantics=("parallel", "parallel", "parallel"),
             ),
             out_shape=out_shapes,

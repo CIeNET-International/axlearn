@@ -330,8 +330,7 @@ T = TypeVar("T")
 @typing.runtime_checkable  # Needed for isinstance checks to work.
 class Summable(Protocol):
     # Objects of the same type which adhere to this protocol may be added.
-    def __add__(self, other: T) -> T:
-        ...
+    def __add__(self, other: T) -> T: ...
 
 
 # TODO(markblee): Link to docs on invocation contexts.
@@ -946,7 +945,7 @@ class Module(Configurable, metaclass=_PostInitMeta):
         path = list(reversed(relative_path))
         if module is None:
             raise InvalidDescendantError(
-                f"Module at {'.'.join(path)} is not a descendant of {self.path()}"
+                f"Module at {".".join(path)} is not a descendant of {self.path()}"
             )
         return path
 
@@ -1026,12 +1025,12 @@ class Module(Configurable, metaclass=_PostInitMeta):
             if part not in target_module.children:
                 raise InvalidDescendantError(
                     f"Module '{target_module.path()}' does not contain '{part}' from path "
-                    f"'{'.'.join(path_from_ancestor)}'"
+                    f"'{".".join(path_from_ancestor)}'"
                 )
             if part not in target_state:
                 raise InvalidDescendantError(
                     f"Module '{target_module.path()}' state does not contain '{part}' from path "
-                    f"'{'.'.join(path_from_ancestor)}'. The state contains: {target_state.keys()}"
+                    f"'{".".join(path_from_ancestor)}'. The state contains: {target_state.keys()}"
                 )
             target_module, target_state = target_module.children[part], target_state[part]
 

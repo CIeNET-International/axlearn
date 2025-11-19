@@ -33,7 +33,6 @@ from axlearn.common.utils import Nested
 
 
 class _ServiceProtocol(enum.Enum):
-
     """https://kubernetes.io/docs/reference/networking/service-protocols/"""
 
     TCP = "TCP"
@@ -42,7 +41,6 @@ class _ServiceProtocol(enum.Enum):
 
 
 class _ServiceType(enum.Enum):
-
     """https://cloud.google.com/kubernetes-engine/docs/concepts/service#types-of-services sss"""
 
     CLUSTER_IP = "ClusterIP"
@@ -171,7 +169,7 @@ class GKEJob(GCPJob):
         cfg: GKEJob.Config = self.config
         api_kwargs = custom_jobset_kwargs()
         custom_object = dict(
-            apiVersion=f"{api_kwargs['group']}/{api_kwargs['version']}",
+            apiVersion=f"{api_kwargs["group"]}/{api_kwargs["version"]}",
             kind="JobSet",
             **self._build_jobset(),
         )
@@ -434,7 +432,7 @@ class GKELeaderWorkerSet(GCPJob):
 
         api_kwargs = custom_leaderworkerset_kwargs()
         custom_object = dict(
-            apiVersion=f"{api_kwargs['group']}/{api_kwargs['version']}",
+            apiVersion=f"{api_kwargs["group"]}/{api_kwargs["version"]}",
             kind="LeaderWorkerSet",
             **self._build_leaderworkerset(),
         )
