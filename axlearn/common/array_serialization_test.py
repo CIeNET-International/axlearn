@@ -209,6 +209,13 @@ class SerializerTest(parameterized.TestCase):
             ),
             get_tensorstore_spec(arr) as spec,
         ):
+        with (
+            mock.patch(
+                f"{array_serialization.__name__}._transfer_to_host",
+                transfer_to_host_patch,
+            ),
+            get_tensorstore_spec(arr) as spec,
+        ):
             f = _CommitFuture(
                 _run_serializer(
                     [arr], [spec], [d2h_future], max_data_shard_degree=-1, shard_threshold_bytes=-1
@@ -240,6 +247,7 @@ class SerializerTest(parameterized.TestCase):
         arrays = [
             mock.Mock(
                 addressable_shards=[
+                    mock.Mock(replica_id=0, **{"data.nbytes": int(shard * 10**9), "data.shape": ()})
                     mock.Mock(replica_id=0, **{"data.nbytes": int(shard * 10**9), "data.shape": ()})
                     for shard in array
                 ],

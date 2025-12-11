@@ -101,6 +101,34 @@ RUN uv pip install -qq --no-deps libtpu==0.0.29 && uv cache clean
 COPY . .
 
 ################################################################################
+# Colocated Python container spec.                                             #
+################################################################################
+
+FROM ${BASE_IMAGE_COLOCATED} AS colocated-python
+
+WORKDIR /app
+COPY . .
+
+# Install the additional user-provided dependencies, strictly enforcing the rules
+# from the base image's constraints file.
+RUN \
+    # 1. Install user-provided dependencies with modified constraints
+    grep -v "^numpy" /opt/venv/server_constraints.txt | grep -v "^scipy" > /tmp/modified_constraints.txt && \
+    echo "--> Installing user-provided dependencies..." && \
+    uv pip install ".[core,gcp]" -c /tmp/modified_constraints.txt && \
+    \
+    # 2. Override numpy and scipy with specific versions
+    uv pip install numpy==2.1.1 scipy==1.15.3 && \
+    \
+    # 3. Verify that the colocated_python_cpu_client is present.
+    echo "--> Verifying JAX patch integrity..." && \
+    python -c "from jax._src.lib import _jax; _jax.colocated_python_cpu_client" && \
+    echo "--> JAX patch verification successful." && \
+    \
+    # 4. Clean the cache to keep the image slim.
+    uv cache clean
+
+################################################################################
 # GPU container spec.                                                          #
 ################################################################################
 
