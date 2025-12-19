@@ -145,7 +145,7 @@ RUN uv pip install -qq .[core,gpu] && uv cache clean
 COPY . .
 
 ################################################################################
-# GPU container spec.                                                          #
+# GPU (ARM) container spec.                                                    #
 ################################################################################
 
 FROM base AS gpu-arm
