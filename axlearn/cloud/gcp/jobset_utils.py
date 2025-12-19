@@ -1839,6 +1839,7 @@ class A4HighReplicatedJob(GPUReplicatedJob):
             },
         ]
 
+
 class A4XReplicatedJob(GPUReplicatedJob):
     """Builds a replicated job spec for an a4-high GPU job, to be used with JobSet API."""
 
@@ -1876,7 +1877,7 @@ class A4XReplicatedJob(GPUReplicatedJob):
                 resourceClaims=[
                     {
                         "name": "compute-domain-channel",
-                        "resourceClaimTemplateName": "a4x-compute-domain-channel"
+                        "resourceClaimTemplateName": "a4x-compute-domain-channel",
                     }
                 ],
                 affinity={
@@ -1888,16 +1889,14 @@ class A4XReplicatedJob(GPUReplicatedJob):
                                         {
                                             "key": "kubernetes.io/arch",
                                             "operator": "In",
-                                            "values": [
-                                                "arm64"
-                                            ]
+                                            "values": ["arm64"],
                                         }
                                     ]
                                 }
                             ]
                         }
                     }
-                }
+                },
             ),
         )
 
@@ -1975,12 +1974,8 @@ class A4XReplicatedJob(GPUReplicatedJob):
             # TODO(markblee): Improve SIGTERM behavior for command.
             command=command,
             resources=dict(
-                limits={
-                    "nvidia.com/gpu": "4"
-                },
-                claims=[
-                    {"name": "compute-domain-channel"}
-                ]),
+                limits={"nvidia.com/gpu": "4"}, claims=[{"name": "compute-domain-channel"}]
+            ),
             env=k8s_env_vars,
             volumeMounts=volume_mounts,
         )
