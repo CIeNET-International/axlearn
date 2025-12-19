@@ -1570,3 +1570,159 @@ class A4HighReplicatedJob(GPUReplicatedJob):
                 "hostPath": {"path": "/home/kubernetes/bin/gib"},
             },
         ]
+
+class A4XReplicatedJob(GPUReplicatedJob):
+    """Builds a replicated job spec for an a4-high GPU job, to be used with JobSet API."""
+
+    Config = GPUReplicatedJob.Config
+
+    def _build_pod(self) -> Nested[Any]:
+        """Builds a config for a single Pod, which is a set of containers.
+
+        https://kubernetes.io/docs/concepts/workloads/pods
+
+        Returns:
+            A nested dict corresponding to a k8s Pod template, including the pod metadata and spec.
+        """
+        cfg: A4XReplicatedJob.Config = self.config
+        volumes = self._build_volumes()
+        annotations = {
+            "kubectl.kubernetes.io/default-container": cfg.name,
+        }
+
+        containers = [self._build_main_container()]
+        init_containers = self._build_init_containers()
+
+        return dict(
+            metadata=dict(annotations=annotations),
+            spec=dict(
+                terminationGracePeriodSeconds=60,
+                # Fail if any pod fails, and allow retries to happen at JobSet level.
+                restartPolicy="Never",
+                initContainers=init_containers,
+                hostNetwork=True,
+                dnsPolicy="ClusterFirstWithHostNet",
+                containers=containers,
+                serviceAccountName=cfg.service_account,
+                volumes=volumes,
+                resourceClaims=[
+                    {
+                        "name": "compute-domain-channel",
+                        "resourceClaimTemplateName": "a4x-compute-domain-channel"
+                    }
+                ],
+                affinity={
+                    "nodeAffinity": {
+                        "requiredDuringSchedulingIgnoredDuringExecution": {
+                            "nodeSelectorTerms": [
+                                {
+                                    "matchExpressions": [
+                                        {
+                                            "key": "kubernetes.io/arch",
+                                            "operator": "In",
+                                            "values": [
+                                                "arm64"
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                }
+            ),
+        )
+
+    def _build_main_container(self) -> Nested[Any]:
+        """Builds the config for the container running the job.
+
+        Returns:
+            A nested dict corresponding to a k8s Container config.
+        """
+        cfg: A4XReplicatedJob.Config = self.config
+
+        base_main_container: Nested[Any] = super()._build_main_container()
+        volume_mounts = base_main_container["volumeMounts"] + [
+            {"name": "gib", "mountPath": "/usr/local/gib"},
+        ]
+
+        env_vars = base_main_container["env"]
+
+        # These flags have been tuned by GCP for a4-high (B200 with InfiniBand)
+        # See Maxtext reference for XLA flags:
+        # https://github.com/AI-Hypercomputer/gpu-recipes/blob/main/training/a4/llama3-1-70b/maxtext-pretraining-gke/values.yaml
+        platform_xla_flags = [
+            "--xla_gpu_all_reduce_combine_threshold_bytes=2147483648",
+            "--xla_gpu_all_gather_combine_threshold_bytes=2147483648",
+            "--xla_gpu_reduce_scatter_combine_threshold_bytes=2147483648",
+            "--xla_gpu_cudnn_gemm_fusion_level=3",
+            "--xla_gpu_enable_command_buffer=FUSION,CUSTOM_CALL",
+        ]
+        # Add platform-specific XLA flags to the common flags
+        # (see global_gpu_xla_flags in GPUReplicatedJob)
+        env_vars["XLA_FLAGS"] += " ".join(platform_xla_flags)
+
+        env_vars.update(
+            {
+                "LD_LIBRARY_PATH": "/usr/local/nvidia/lib64",
+                "CUDA_DEVICE_MAX_CONNECTIONS": "1",
+                "XLA_PYTHON_CLIENT_MEM_FRACTION": "0.92",
+                "TF_FORCE_GPU_ALLOW_GROWTH": "true",
+                "NCCL_DEBUG": "INFO",
+                "NCCL_PXN_C2C": "1",
+                "NCCL_IB_MERGE_VFS": "0",
+                "NCCL_IB_ADAPTIVE_ROUTING": "1",
+                "NCCL_IB_QPS_PER_CONNECTION": "4",
+                "NCCL_IB_TC": "52",
+                "NCCL_IB_FIFO_TC": "84",
+            }
+        )
+
+        # Override env vars with user provided env vars.
+        env_vars.update(cfg.env_vars)
+        # K8s expects each env variable to be a dict.
+        k8s_env_vars = [{"name": name, "value": value} for name, value in env_vars.items()]
+        k8s_env_vars.append(
+            {
+                "name": "PROCESS_ID",
+                "valueFrom": {
+                    "fieldRef": {
+                        "fieldPath": (
+                            "metadata.annotations['batch.kubernetes.io/job-completion-index']"
+                        ),
+                    }
+                },
+            },
+        )
+
+        command = ["bash", "-c", cfg.command]
+
+        return dict(
+            name=cfg.name,
+            image=self._bundler.id(cfg.name),
+            ports=[
+                dict(containerPort=8080),  # Port for MXLA coordinator.
+            ],
+            securityContext=dict(privileged=True),
+            # TODO(markblee): Improve SIGTERM behavior for command.
+            command=command,
+            resources=dict(
+                limits={
+                    "nvidia.com/gpu": "4"
+                },
+                claims=[
+                    {"name": "compute-domain-channel"}
+                ]),
+            env=k8s_env_vars,
+            volumeMounts=volume_mounts,
+        )
+
+    def _build_volumes(self) -> Nested[Any]:
+        """Builds a config for volumes."""
+
+        return super()._build_volumes() + [
+            {
+                "name": "gib",
+                "hostPath": {"path": "/home/kubernetes/bin/gib"},
+            },
+        ]
