@@ -2,6 +2,7 @@
 
 ARG TARGET=base
 ARG BASE_IMAGE=ubuntu:24.04
+ARG BASE_IMAGE_COLOCATED=us-docker.pkg.dev/cloud-tpu-v2-images/pathways-colocated-python/sidecar:2025_10_29-python_3.10-jax_0.6.2
 
 FROM ${BASE_IMAGE} AS base
 
