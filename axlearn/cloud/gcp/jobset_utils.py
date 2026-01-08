@@ -1590,7 +1590,7 @@ class A4HighReplicatedJob(GPUReplicatedJob):
 
 
 class A4XReplicatedJob(GPUReplicatedJob):
-    """Builds a replicated job spec for an a4-high GPU job, to be used with JobSet API."""
+    """Builds a replicated job spec for an a4x GPU job, to be used with JobSet API."""
 
     Config = GPUReplicatedJob.Config
 
