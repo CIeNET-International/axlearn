@@ -20,7 +20,6 @@ import dataclasses
 import functools
 import typing
 from typing import (
-    Callable,
     Generic,
     Iterable,
     Optional,
@@ -717,28 +716,30 @@ class ZeroAttentionBias(BoolAttentionBias):
         return type(other) is type(self)
 
 
-def _composite_masks(op: Callable[[Tensor, Tensor], Tensor], *mask_fns: ConfigOr[MaskFn]):
-    if len(mask_fns) == 0:
-        raise RuntimeError(f"Input must not be empty: {mask_fns}")
+def or_masks(*mask_fns: ConfigOr[MaskFn]) -> MaskFn:
+    """Returns a MaskFn that's the union of provided MaskFn's."""
 
     def mask(query_position: Tensor, key_position: Tensor):
         fns = [maybe_instantiate(arg) for arg in mask_fns]
         result = fns[0](query_position, key_position)
         for mask in fns[1:]:
-            result = op(result, mask(query_position, key_position))
+            result = result | mask(query_position, key_position)
         return result
 
     return mask
 
 
-def or_masks(*mask_fns: ConfigOr[MaskFn]) -> MaskFn:
-    """Returns a MaskFn that's the union of provided MaskFn's."""
-    return _composite_masks(jnp.logical_or, *mask_fns)
-
-
 def and_masks(*mask_fns: ConfigOr[MaskFn]) -> MaskFn:
     """Returns a MaskFn that's the intersection of provided MaskFn's."""
-    return _composite_masks(jnp.logical_and, *mask_fns)
+
+    def mask(query_position: Tensor, key_position: Tensor) -> Tensor:
+        fns = [maybe_instantiate(arg) for arg in mask_fns]
+        result = fns[0](query_position, key_position)
+        for mask in fns[1:]:
+            result = result & mask(query_position, key_position)
+        return result
+
+    return mask
 
 
 def sliding_window_causal_mask(sliding_window_size: int) -> MaskFn:
@@ -753,12 +754,29 @@ def sliding_window_causal_mask(sliding_window_size: int) -> MaskFn:
         sliding_window_size: Left context of sliding window mask.
     """
 
-    def mask(query_position: Tensor, key_position: Tensor):
+    def mask(query_position: Tensor, key_position: Tensor) -> Tensor:
         pos_mask = query_position - key_position <= sliding_window_size
         return pos_mask
 
     fun = and_masks(causal_mask, mask)
     return fun
+
+
+def truncated_key_mask(valid_k_len: int) -> MaskFn:
+    """Creates a mask function that cuts off attention beyond valid_k_len.
+
+    Args:
+        valid_k_len: The valid key length. Positions >= valid_k_len will be masked out.
+
+    Returns:
+        A mask function that returns True for key_position < valid_k_len, False otherwise.
+    """
+
+    def mask_fn(query_position: Tensor, key_position: Tensor) -> Tensor:
+        del query_position
+        return key_position < valid_k_len
+
+    return mask_fn
 
 
 def make_causal_biases(seq_len: int) -> Tensor:

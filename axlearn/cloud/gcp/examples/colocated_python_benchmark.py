@@ -21,7 +21,7 @@ from typing import Any, Dict, Sequence
 
 import jax
 import jax.numpy as jnp
-import pathwaysutils
+import pathwaysutils  # pytype: disable=import-error
 from jax._src.mesh import thread_resources
 from jax.experimental import colocated_python, mesh_utils
 from jax.experimental.array_serialization import serialization as array_serialization
@@ -93,7 +93,7 @@ def _colocated_deserialize(
             return await asyncio.gather(*future_arrays)
 
         result = asyncio.run(gather_func())
-        logging.info(f"Deserialize took {time.perf_counter() - start_colocated_time:.2f} seconds")
+        logging.info("Deserialize took %.2f seconds", time.perf_counter() - start_colocated_time)
         return result
 
     run_deserializer = run_deserializer.specialize(
@@ -160,6 +160,7 @@ def is_learner_path(path: str) -> bool:
     return path.startswith("learner/")
 
 
+# pylint: disable-next=unused-argument
 def get_inference_partition_spec(path: str, shape: tuple) -> jax.sharding.PartitionSpec:
     """Get inference-friendly partition spec based on tensor path and shape."""
     if "track" in path:
