@@ -544,6 +544,20 @@ def get_trainer_kwargs(
                         ],
                     ),
                 ),
+                # Ensure the gpu_block_size is updated for GB200 / A4X
+                (
+                    "gpu-(a4x-highgpu-4g)-(256|512|1024)",
+                    ChainConfigModifier.default_config().set(
+                        config_modifiers=[
+                            MeshShapeModifier.default_config().set(
+                                # Set FSDP=4 since each instance has 4 GPUs
+                                mesh_shape=mesh_shape_from_axes(data=-1, fsdp=4)
+                            ),
+                            # Modify the GPU block-size for B200 platform (Pallas kernels)
+                            FlashBlockSizeModifier.default_config().set(gpu_block_size=64),
+                        ],
+                    ),
+                ),
                 (
                     "neuron-(trn2|trn2n).48xlarge-64",
                     ChainConfigModifier.default_config().set(
@@ -874,7 +888,7 @@ def get_trainer_kwargs(
                     ),
                 ),
                 (
-                    "gpu-(a4-highgpu-8g)-(256|512|1024)",
+                    "gpu-(a4-highgpu-8g|a4x-highgpu-4g)-(256|512|1024)",
                     ChainConfigModifier.default_config().set(
                         config_modifiers=[
                             MeshShapeModifier.default_config().set(
