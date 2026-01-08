@@ -896,7 +896,7 @@ def get_trainer_kwargs(
                             ),
                             # Modify the GPU block-size for B200 platform (Pallas kernels)
                             FlashBlockSizeModifier.default_config().set(gpu_block_size=64),
-                                                        RematSpecModifier.default_config().set(
+                            RematSpecModifier.default_config().set(
                                 remat_policies={
                                     "model.decoder.transformer.layer": RematSpec(
                                         prevent_cse=False,
@@ -905,7 +905,7 @@ def get_trainer_kwargs(
                                         ).set(
                                             names_which_can_be_saved="|".join(
                                                 [
-                                                    RematRegexSavePatterns.NATIVE_ATTENTION.value,
+                                                    RematRegexSavePatterns.QKV_PROJ.value,
                                                 ]
                                             ),
                                             names_which_can_be_offloaded="|".join(
