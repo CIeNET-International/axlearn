@@ -37,7 +37,6 @@ import optax
 import typing_extensions
 from absl import logging
 from jax import numpy as jnp
-
 from optax._src import numerics
 
 from axlearn.common import flax_struct, schedule
