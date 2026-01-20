@@ -2978,37 +2978,53 @@ class TransformerAttentionLayer(BaseLayer):
         kv_kwargs["return_aux"] = return_aux
 
         def attention_thunk(target: Tensor) -> tuple[Optional[NestedTensor], Tensor]:
+            merged_kv_kwargs = {**kv_kwargs}
             if mode == ForwardMode.FORWARD:
+                if attention_logit_biases is not None:
+                    merged_kv_kwargs["attention_logit_biases"] = attention_logit_biases
+                if segment_ids is not None:
+                    merged_kv_kwargs["segment_ids"] = segment_ids
+                if target_positions is not None:
+                    merged_kv_kwargs["query_positions"] = target_positions
+
                 atten_state, atten_output = (
                     None,
                     self.attention(
                         query=target,
-                        **kv_kwargs,
-                        attention_logit_biases=attention_logit_biases,
-                        segment_ids=segment_ids,
-                        query_positions=target_positions,
+                        **merged_kv_kwargs,
                     ),
                 )
             elif mode == ForwardMode.INIT_STATES:
                 assert cached_states is not None
                 assert segment_ids is None
                 assert target_positions is None
+
+                configs = {"attention_logit_biases": attention_logit_biases}
+
+                kwargs = {k: v for k, v in configs.items() if v is not None}
+
                 atten_state, atten_output = self.attention.init_states(
                     time_step=cached_states["attention"],
                     query=target,
                     **kv_kwargs,
-                    attention_logit_biases=attention_logit_biases,
+                    **kwargs,
                 )
             elif mode == ForwardMode.EXTEND_STEP:
                 assert cached_states is not None
                 assert segment_ids is None
                 assert target_positions is None
+
+                confis = {
+                    "attention_logit_biases": attention_logit_biases,
+                    "page_pool": page_pool,
+                }
+
+                kwargs = {k: v for k, v in confis.items() if v is not None}
                 atten_state, atten_output = self.attention.extend_step(
                     cached_states["attention"],
                     target,
                     **kv_kwargs,
-                    attention_logit_biases=attention_logit_biases,
-                    page_pool=page_pool,
+                    **kwargs,
                 )
             else:
                 raise ValueError(f"Unrecognized mode {mode}.")
