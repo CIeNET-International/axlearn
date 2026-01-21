@@ -581,7 +581,6 @@ def _splash_attention_forward(
         out_specs += [None]
 
     kernel_name = get_kernel_name(
-        # block_metadata=dataclasses.asdict(block_sizes),
         is_mqa=is_mqa,
         save_residuals=save_residuals,
         is_segmented=segment_ids is not None,
@@ -1074,13 +1073,6 @@ def _splash_attention_bwd_dq(
     num_scalar_prefetch = 3
 
     kernel_name = get_kernel_name(
-        # block_metadata=dict(
-        #     block_q_dq=bq,
-        #     block_kv_dq=bkv,
-        #     q_layout=q_layout,
-        #     k_layout=k_layout,
-        #     v_layout=v_layout,
-        # ),
         is_mqa=is_mqa,
         save_residuals=False,
         is_segmented=segment_ids is not None,
@@ -1664,14 +1656,6 @@ def _splash_attention_bwd_dkv(
     num_scalar_prefetch = 4
 
     kernel_name = get_kernel_name(
-        # block_metadata=dict(
-        #     block_q_dkv=bq,
-        #     block_kv_dkv=bkv,
-        #     block_kv_dkv_compute=bkv_compute,
-        #     q_layout=q_layout,
-        #     k_layout=k_layout,
-        #     v_layout=v_layout,
-        # ),
         is_mqa=is_mqa,
         save_residuals=False,
         is_segmented=segment_ids is not None,
