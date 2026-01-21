@@ -177,9 +177,9 @@ def flash_attention_kernel(
         q = q_ref[...] if q_layout == HEAD_DIM_MINOR else q_ref[...].T
         qk_dims = NT_DIM_NUMBERS if k_layout == HEAD_DIM_MINOR else NN_DIM_NUMBERS
         if k_layout == HEAD_DIM_MINOR:
-            k = pl.load(k_ref, (slice_k, slice(None)))
+            k = k_ref[slice_k, :]
         else:
-            k = pl.load(k_ref, (slice(None), slice_k))
+            k = k_ref[:, slice_k]
         k = k.astype(q.dtype)
 
         # TODO(changlan): Revisit once Mosaic supports higher precision.
@@ -235,9 +235,9 @@ def flash_attention_kernel(
 
         sv_dims = NN_DIM_NUMBERS if v_layout == HEAD_DIM_MINOR else NT_DIM_NUMBERS
         if v_layout == HEAD_DIM_MINOR:
-            v = pl.load(v_ref, (slice_k, slice(None)))
+            v = v_ref[slice_k, :]
         else:
-            v = pl.load(v_ref, (slice(None), slice_k))
+            v = v_ref[:, slice_k]
         v = v.astype(float32)
 
         if dropout_rate > 0.0:
@@ -1203,14 +1203,14 @@ def _flash_attention_dkv_kernel(
 
         def _load_kv(ref, layout):
             if layout == HEAD_DIM_MINOR:
-                return pl.load(ref, (slice_k, slice(None)))
-            return pl.load(ref, (slice(None), slice_k)).T
+                return ref[slice_k, :]
+            return ref[:, slice_k].T
 
         k = _load_kv(k_ref, k_layout).astype(q.dtype)
         v = _load_kv(v_ref, v_layout).astype(q.dtype)
-        logsumexp = pl.load(logsumexp_ref, (pl.ds(1), slice(None)))
+        logsumexp = logsumexp_ref[pl.ds(1), :]
         do = do_ref[...]
-        di = pl.load(di_ref, (pl.ds(1), slice(None)))
+        di = di_ref[pl.ds(1), :]
 
         qk_dims = NT_DIM_NUMBERS if q_layout == HEAD_DIM_MINOR else NN_DIM_NUMBERS
         # TODO(changlan): Revisit once Mosaic supports higher precision.
@@ -1276,8 +1276,8 @@ def _flash_attention_dkv_kernel(
             preferred_element_type=jnp.float32,
             precision=precision,
         )
-        dv = dv.astype(dv_scratch_ref.dtype) + pl.load(dv_scratch_ref, (slice_k, slice(None)))
-        pl.store(dv_scratch_ref, (slice_k, slice(None)), dv)
+        dv = dv.astype(dv_scratch_ref.dtype) + dv_scratch_ref[slice_k, :]
+        dv_scratch_ref[slice_k, :] = dv
 
         ds = (dp - di) * p
         if attn_logits_soft_cap is not None:
@@ -1293,8 +1293,8 @@ def _flash_attention_dkv_kernel(
             preferred_element_type=jnp.float32,
             precision=precision,
         )
-        dk = dk.astype(dk_scratch_ref.dtype) + pl.load(dk_scratch_ref, (slice_k, slice(None)))
-        pl.store(dk_scratch_ref, (slice_k, slice(None)), dk)
+        dk = dk.astype(dk_scratch_ref.dtype) + dk_scratch_ref[slice_k, :]
+        dk_scratch_ref[slice_k, :] = dk
         if dq_scratch_ref is not None or dq_ref is not None:
             dq = lax.dot_general(
                 ds.T.astype(k.dtype),
