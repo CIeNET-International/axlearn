@@ -32,10 +32,10 @@ BACKENDS = dict(
     tpu=[TPUDecoding, TPUSplashAttentionWithAllGather, TPUSplashAttention, LegacyTPUFlashAttention],
     gpu=[
         GPUDecoding,
-        # For GPU, prefer cuDNN (without bias) whenever possible, as it's the fastest.
-        CuDNNGPUFlashAttention,
         # Fallbacks to Pallas if cuDNN cannot be used without instantiating bias tensors.
         PallasGPUFlashAttention,
+        # For GPU, prefer cuDNN (without bias) whenever possible, as it's the fastest.
+        CuDNNGPUFlashAttention,
         # If Pallas is not supported, fallback to cuDNN with bias as the last resort before we
         # fallback to plain XLA.
         CuDNNGPUFlashAttentionWithExplicitBias,
