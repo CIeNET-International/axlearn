@@ -967,15 +967,13 @@ class TestFlashAttention(TestCase):
                 ref_inputs["query"] = cur_query
                 ref_extend_step_outputs, _ = extend_one_step(params, ref_inputs, ref_layer)
                 ref_inputs["cached_states"] = ref_extend_step_outputs[0]
-                ref_decoder_output = ref_decoder_output.at[t].set(
-                    jnp.squeeze(ref_extend_step_outputs[1].data, axis=1)
-                )
+                ref_step_data = jnp.squeeze(ref_extend_step_outputs[1].data, axis=1)
+                ref_decoder_output[t] = ref_step_data
 
                 extend_step_outputs, _ = extend_one_step(params, inputs, test_layer)
                 inputs["cached_states"] = extend_step_outputs[0]
-                decoder_output = decoder_output.at[t].set(
-                    jnp.squeeze(extend_step_outputs[1].data, axis=1)
-                )
+                extend_step_data = jnp.squeeze(extend_step_outputs[1].data, axis=1)
+                decoder_output[t] = extend_step_data
 
                 self.assertNestedAllClose(
                     decoder_output[t],
