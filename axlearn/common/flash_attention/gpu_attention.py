@@ -175,7 +175,8 @@ def _mha_forward_kernel(
     # read, compute, and write all in 2d chunks. 1 element ~= 1 CUDA thread index.
     # q tile has shape [block_q, block_d], block_d >= head_dim and is a power of 2.
     curr_q_slice = pl.dslice(start_q * block_q, block_q)
-    q = jnp.where(d_mask, q_ref[:, :], 0)
+    q_raw = q_ref[...]
+    q = jnp.where(d_mask, q_raw, 0)
     q_segment_ids = None if s_ref is None else s_ref[curr_q_slice]
     # In FlashAttention algorithm 1 there are 2 loops: slow over tiles of kv (size
     # (Bc == block_k here), and fast over blocks of q (size Br == block_q here).
@@ -217,7 +218,7 @@ def _mha_forward_kernel(
         l_curr = s_curr.sum(axis=-1)
         l_next = l_prev_corr + l_curr
         o_prev_corr = correction[:, None] * o_prev
-        v = jnp.where(d_mask, v_ref[curr_k_slice, :], jnp.nan)
+        v = jnp.where(d_mask, v_ref[curr_k_slice, :], 0.0)
         if dropout_rate > 0:
             dropout_mask = dropout_mask_ref[:, curr_k_slice]
             s_curr = jnp.where(dropout_mask, 0, s_curr / (1 - dropout_rate))
@@ -240,7 +241,8 @@ def _mha_forward_kernel(
         lse_ref = residual_refs[0]
         lse_ref[...] = m_i + jnp.log(l_i)
     # Write output to dram.
-    jnp.where(d_mask, o.astype(o_ref.dtype), o_ref[:, :])
+    o_final = jnp.where(d_mask, o.astype(o_ref.dtype), 0.0)
+    o_ref[...] = o_final
 
 
 # pylint: disable=unused-argument
