@@ -17,7 +17,6 @@ from axlearn.cloud.gcp.jobset_utils import (
     A3MegaReplicatedJob,
     A3UltraReplicatedJob,
     A4HighReplicatedJob,
-    A4XReplicatedJob,
     TPUReplicatedJob,
 )
 from axlearn.cloud.gcp.k8s_backend_policy import LWSGCPBackendPolicy
@@ -96,7 +95,6 @@ def _get_gpu_runners() -> dict[str, BaseRunnerJob.Config]:
         "gke_gpu_a3_mega_single": A3MegaReplicatedJob,
         "gke_gpu_a3_ultra_single": A3UltraReplicatedJob,
         "gke_gpu_a4_high_single": A4HighReplicatedJob,
-        "gke_gpu_a4x_single": A4XReplicatedJob,
     }
 
     runner_configs = {}
