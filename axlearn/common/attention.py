@@ -2993,7 +2993,6 @@ class TransformerAttentionLayer(BaseLayer):
                 assert cached_states is not None
                 assert segment_ids is None
                 assert target_positions is None
-
                 atten_state, atten_output = self.attention.init_states(
                     time_step=cached_states["attention"],
                     query=target,
@@ -3004,7 +3003,6 @@ class TransformerAttentionLayer(BaseLayer):
                 assert cached_states is not None
                 assert segment_ids is None
                 assert target_positions is None
-
                 atten_state, atten_output = self.attention.extend_step(
                     cached_states["attention"],
                     target,
