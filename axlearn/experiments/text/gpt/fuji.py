@@ -292,6 +292,7 @@ def get_trainer_kwargs(
     rope_theta = ROPE_THETA[version]
 
     trn2_config = _generate_trn2_custom_configs(model_size, version=version)
+    max_step=500
 
     # dict() is more readable here.
     # pylint: disable=use-dict-literal
@@ -403,6 +404,7 @@ def get_trainer_kwargs(
             max_sequence_length=max_sequence_length,
             train_batch_size=train_batch_size,
             max_step=max_step,
+            save_every_n_steps=100,
             mesh_shape=mesh_shape_from_axes(data=-1, fsdp=8),
             mesh_rules=(
                 # Step time:
