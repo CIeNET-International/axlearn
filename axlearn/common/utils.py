@@ -637,7 +637,14 @@ def with_sharding_constraint(x: Tensor, shardings):
     mesh = thread_resources.env.physical_mesh
     if mesh.empty or mesh.size == 1:
         return x
-    return jax.lax.with_sharding_constraint(x, shardings)
+    try:
+        return jax.lax.with_sharding_constraint(x, shardings)
+    except ValueError as e:
+        logging.warning("with_sharding_constraint failed: %s. Try to re-shard.", e)
+        if "reshard" in str(e) or "Explicit" in str(e):
+            named_sharding = jax.sharding.NamedSharding(mesh, shardings)
+            return jax.device_put(x, named_sharding)
+        raise e
 
 
 def maybe_shard(x: NestedTensor, partition_spec: Optional[PartitionSpec]) -> NestedTensor:
