@@ -2651,7 +2651,15 @@ class MultiheadAttentionTest(TestCase):
             self.skipTest(f"Unsupported mesh shape {mesh_shape}")
         model_dim = 16
         num_heads = 4
-        mesh = jax.make_mesh(mesh_shape, axis_names=("fsdp", "seq", "model"))
+        mesh = jax.make_mesh(
+            mesh_shape,
+            axis_names=("fsdp", "seq", "model"),
+            axis_types=(
+                jax.sharding.AxisType.Auto,
+                jax.sharding.AxisType.Auto,
+                jax.sharding.AxisType.Auto,
+            ),
+        )
         q_part = ("fsdp", "seq", "model", None)
         o_part = ("fsdp", "seq", None)
 
