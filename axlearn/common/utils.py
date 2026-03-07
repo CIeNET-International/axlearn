@@ -643,7 +643,7 @@ def with_sharding_constraint(x: Tensor, shardings):
         logging.warning("with_sharding_constraint failed: %s. Try to re-shard.", e)
         if "reshard" in str(e) or "Explicit" in str(e):
             named_sharding = jax.sharding.NamedSharding(mesh, shardings)
-            return jax.device_put(x, named_sharding)
+            return jax.lax.reshard(x, named_sharding)
         raise e
 
 
