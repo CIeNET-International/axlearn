@@ -14,6 +14,7 @@ requires-python = "==3.12.*"
 dependencies = [
     "attrs>=23.1.0", # We use `type` in `attrs.field`
     "numpy>=2.0,<3",  # verified with tensorflow 2.14 RaggedTensor
+    "importlib_resources>=6.0.0",
 ]
 
 [project.optional-dependencies]
