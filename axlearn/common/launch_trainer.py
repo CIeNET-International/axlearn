@@ -154,6 +154,8 @@ def _run_trainer_impl(trainer_config: SpmdTrainer.Config) -> Any:
     if FLAGS.jax_backend == "proxy":
         # pylint: disable-next=import-error,import-outside-toplevel
         from pathwaysutils.elastic import manager
+
+        logging.info("===========Entering the Proxy jax backend.========")
         elastic_manager = manager.Manager()
         max_attempts = 5
         for attempt_index in range(max_attempts):
