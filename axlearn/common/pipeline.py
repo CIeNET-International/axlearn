@@ -288,7 +288,7 @@ class GPipeSchedule(BaseSchedule):
         """See `BaseSchedule.scan` for details."""
 
         @functools.partial(
-            jax.ad_checkpoint.checkpoint,
+            jax.checkpoint,
             prevent_cse=False,
             policy=jax.checkpoint_policies.nothing_saveable,
         )
@@ -515,7 +515,7 @@ class StreamSchedule(BaseSchedule):
         m = self.num_microbatches
 
         @functools.partial(
-            jax.ad_checkpoint.checkpoint,
+            jax.checkpoint,
             prevent_cse=False,
             policy=jax.checkpoint_policies.save_only_these_names("iter_input"),
         )

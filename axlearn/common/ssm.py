@@ -1519,7 +1519,7 @@ class SSDdtBiasInitializer(Initializer):
         ).astype(
             dtype
         )  # math.log may return float64, so we need to cast to dtype
-        dt = jnp.clip(dt, a_min=cfg.dt_init_floor)
+        dt = jnp.clip(dt, min=cfg.dt_init_floor)
         # Get inverse of softplus.
         inv_dt = dt + jnp.log(-jnp.expm1(-dt))
         return inv_dt

@@ -277,8 +277,8 @@ class _HfExtractiveQuestionAnsweringWrapper(HfModuleWrapper):
         if start_positions is not None and end_positions is not None:
             # If the start/end positions are outside of model inputs, we ignore these terms.
             seq_len = start_logits.shape[1]
-            start_positions = jnp.clip(start_positions, a_max=seq_len - 1)
-            end_positions = jnp.clip(end_positions, a_max=seq_len - 1)
+            start_positions = jnp.clip(start_positions, max=seq_len - 1)
+            end_positions = jnp.clip(end_positions, max=seq_len - 1)
 
             is_valid_input = jnp.logical_and(start_positions >= 0, end_positions >= 0)
             num_inputs = is_valid_input.sum()
