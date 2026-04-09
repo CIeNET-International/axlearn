@@ -122,7 +122,7 @@ class MambaDtProjInitializer(Initializer):
                 * (math.log(cfg.dt_max) - math.log(cfg.dt_min))
                 + math.log(cfg.dt_min)
             )
-            dt = jnp.clip(dt, a_min=cfg.dt_init_floor)
+            dt = jnp.clip(dt, min=cfg.dt_init_floor)
             # Get inverse of softplus.
             inv_dt = dt + jnp.log(-jnp.expm1(-dt))
             return inv_dt
