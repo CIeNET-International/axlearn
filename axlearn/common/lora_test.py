@@ -50,8 +50,8 @@ class LoraLinearTest(TestCase):
         layer_cfg.lora_up.param_partition_spec = [None, "data"]
         layer = layer_cfg.instantiate(parent=None)
         param_specs = layer.create_parameter_specs_recursively()
-        self.assertEqual(param_specs["lora_down"]["weight"].mesh_axes, ("data", None))
-        self.assertEqual(param_specs["lora_up"]["weight"].mesh_axes, (None, "data"))
+        self.assertEqual(tuple(param_specs["lora_down"]["weight"].mesh_axes), ("data", None))
+        self.assertEqual(tuple(param_specs["lora_up"]["weight"].mesh_axes), (None, "data"))
 
     def test_forward(self):
         input_dim = 2
