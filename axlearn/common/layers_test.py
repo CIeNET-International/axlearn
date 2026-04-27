@@ -572,14 +572,14 @@ class LayerTest(TestCase):
 
         # 1. Input tensor constraint.
         input_spec = calls[0].args[1]
-        self.assertEqual(tuple(input_spec), ("fsdp", "model", None))
+        self.assertEqual((input_spec), jax.P("fsdp", "model", None))
         self.assertEqual(calls[0].args[0].shape, (2, 3, dim))
         self.assertEqual(calls[0].args[0].dtype, jnp.float32)
         np.testing.assert_array_equal(calls[0].args[0], inputs)
 
         # 2. Output tensor constraint.
         output_spec = calls[1].args[1]
-        self.assertEqual(tuple(output_spec), ("fsdp", None, None))
+        self.assertEqual((output_spec), jax.P("fsdp", None, None))
         self.assertEqual(calls[1].args[0].shape, (2, 3, dim))
         self.assertEqual(calls[1].args[0].dtype, jnp.float32)
         np.testing.assert_array_equal(calls[1].args[0], outputs)

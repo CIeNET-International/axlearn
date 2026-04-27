@@ -6433,7 +6433,7 @@ class LogitSinkTest(TestCase):
         self.assertIn("sink", param_specs)
         sink_spec = param_specs["sink"]
         self.assertEqual(sink_spec.shape, (num_heads,))
-        self.assertEqual(tuple(sink_spec.mesh_axes), ("model",))
+        self.assertEqual((sink_spec.mesh_axes), jax.P("model",))
         self.assertEqual(sink_spec.weight_decay_scale, 0.0)
 
     def test_logit_sink_disabled_by_default(self):

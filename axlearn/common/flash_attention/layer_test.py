@@ -526,7 +526,7 @@ class TestFlashAttention(TestCase):
             spec = test_layer._logit_biases_spec(segment_ids)  # pylint: disable=protected-access
             spec = as_partition_spec(spec)
             self.assertIsInstance(spec, PartitionSpec)
-            self.assertEqual(tuple(spec), test_layer.config.mha_dim_to_partition_spec["btnh"][:2])
+            self.assertEqual(spec, jax.P(test_layer.config.mha_dim_to_partition_spec["btnh"][:2]))
 
     @parameterized.product(
         _TEST_CONFIGS,
