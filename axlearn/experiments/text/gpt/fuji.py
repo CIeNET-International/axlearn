@@ -295,11 +295,12 @@ def get_trainer_kwargs(
 
     # dict() is more readable here.
     # pylint: disable=use-dict-literal
+    # Camilo: Changes made to fuji-test to make replica resize work.
     if model_size == "test":
         trainer_kwargs = dict(
             model_kwargs=dict(
                 num_layers=4,
-                hidden_dim=8,
+                hidden_dim=32,
                 ffn_dim=scaled_hidden_dim(scale=8 / 3, round_up_to_multiples_of=16),
                 num_heads=4,
                 num_kv_heads=2,
@@ -310,12 +311,12 @@ def get_trainer_kwargs(
             ),
             learner_kwargs=dict(peak_lr=6e-4, weight_decay=0.01),
             max_sequence_length=64,
-            train_batch_size=32,
-            eval_batch_size=32,
-            max_step=3000,
-            eval_every_n_steps=1500,
-            save_every_n_steps=500,
-            mesh_shape=mesh_shape_from_axes(data=-1),
+            train_batch_size=train_batch_size,
+            eval_batch_size=train_batch_size,
+            max_step=10000,
+            eval_every_n_steps=50000,
+            save_every_n_steps=1000,
+            mesh_shape=mesh_shape_from_axes(data=-1, fsdp=8),
         )
     elif model_size == "1B":
         trainer_kwargs = dict(

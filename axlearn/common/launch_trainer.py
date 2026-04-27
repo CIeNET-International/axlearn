@@ -149,7 +149,15 @@ def get_trainer_config(
         select_mesh_config(trainer_config, mesh_selector=flag_values.mesh_selector)
     trainer_config.mesh_axis_names = trainer_config.mesh_axis_names or ("data", "model")
     # trainer_config.mesh_shape = trainer_config.mesh_shape or (len(jax.devices()), 1)
-    trainer_config.mesh_shape = trainer_config.mesh_shape or (len(live_devices()), 1)
+
+    print("Live devices ", live_devices())
+    if len(live_devices()) == 32:
+      trainer_config.mesh_shape = trainer_config.mesh_shape or (len(live_devices()), 1)
+    if len(live_devices()) == 16:
+      trainer_config.mesh_shape = (1, 1, 1, len(live_devices()), 1, 1)
+
+    print("trainer_config.mesh_shape by camilo: ", trainer_config.mesh_shape)
+
     if isinstance(trainer_config.mesh_shape, MeshShape):
         trainer_config.mesh_shape = infer_mesh_shape(trainer_config.mesh_shape)
     trainer_config.start_trace_steps = [int(el) for el in flag_values.trace_at_steps]

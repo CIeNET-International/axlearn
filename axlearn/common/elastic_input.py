@@ -49,7 +49,8 @@ from axlearn.common import input_base
 from axlearn.common.config import REQUIRED, Required, config_class, maybe_set_config
 from axlearn.common.input_dispatch import BaseInputDispatcher, _validate_logical_feed_shapes
 from axlearn.common.module import Module
-from axlearn.common.utils import Nested, Tensor, live_devices
+from axlearn.common.utils import Nested, Tensor, live_devices, live_slice_indices
+
 
 
 class ElasticSpmdInputDispatcher(BaseInputDispatcher):
@@ -79,6 +80,10 @@ class ElasticSpmdInputDispatcher(BaseInputDispatcher):
         if cfg.num_max_slices is None:
             return False
         else:
+            print(
+              f"Live_slice_count by lkolluru: {live_slice_indices()}, slices_cnt: {len(live_slice_indices())}",
+              live_slice_indices(),len(live_slice_indices())
+            )
             if slice_count() < cfg.num_max_slices:
                 return True
             elif slice_count() >= cfg.num_max_slices:
@@ -95,6 +100,7 @@ class ElasticSpmdInputDispatcher(BaseInputDispatcher):
         cfg: ElasticSpmdInputDispatcher.Config = self.config
 
         mesh = thread_resources.env.physical_mesh
+        print("physical mesh by lkolluru: ", mesh)
         if mesh.empty:
             raise ValueError("Expected to be initialized within the context of a mesh.")
 
@@ -120,6 +126,7 @@ class ElasticSpmdInputDispatcher(BaseInputDispatcher):
         )
         if self.is_in_elastic_mode:
             num_partitions = num_partitions // slice_count() * cfg.num_max_slices
+            print(f"num_partitions by lkolluru: {num_partitions} and live_devices: {slice_count()} ")
 
         if cfg.global_logical_batch_size % num_partitions != 0:
             raise ValueError(
@@ -128,6 +135,7 @@ class ElasticSpmdInputDispatcher(BaseInputDispatcher):
             )
 
         self._device_physical_batch_size = cfg.global_logical_batch_size // num_partitions
+        print("device_physical_batch_size on init by lkolluru: ", self._device_physical_batch_size)
 
         # Infer the physical feeds and feed index along dim=0.
         _, _, pid2fid = get_process_index_and_count_and_mapping(
@@ -178,6 +186,7 @@ class ElasticSpmdInputDispatcher(BaseInputDispatcher):
 
         if self.is_in_elastic_mode:
             print(" In elastic mode lkolluru")
+            # I think this should be len(live_slice_indices())....
             adjusted_device_physical_batch_size = math.ceil(
                 self._device_physical_batch_size * (cfg.num_max_slices / slice_count())
             )

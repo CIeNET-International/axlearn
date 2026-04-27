@@ -98,6 +98,9 @@ def live_devices():
     device_list = jax.devices()
 
     if pathwaysutils.is_pathways_backend_used() and elastic_manager is not None:
+        # print(f"Live devices: {device_list}, active slices: {elastic_manager.active_slice_indices}")
+        # return_cnt = [d for d in device_list if d.slice_index in elastic_manager.active_slice_indices]
+        # print(f"Live Devices by camilo return value : {return_cnt}")
         return [d for d in device_list if d.slice_index in elastic_manager.active_slice_indices]
     else:
         return device_list
@@ -1820,11 +1823,14 @@ def create_device_mesh(
     # Check if the devices are part of a multi-granule configuration.
     # <https://github.com/google/jax/blob/b81b79c1b0d2ec/jax/experimental/mesh_utils.py#L313>
     device_platform = devices[0].platform
+
+    print(f"Devices before granule calculation: {devices}")
     device_attr = "process_index" if device_platform != "tpu" else "slice_index"
     is_multi_granule_env = hasattr(devices[0], device_attr)
     if not all(el.platform == device_platform for el in devices):
         raise NotImplementedError(f"Not all devices had platform: {device_platform}.")
-
+    print("IS MULTI GRANULE by camilo: {is_multi_granule_env}")
+    print(f"Granule devices: {(getattr(el, device_attr) for el in devices.flatten())} + 1, by camilo")
     num_granules = (
         max(getattr(el, device_attr) for el in devices.flatten()) + 1 if is_multi_granule_env else 1
     )
@@ -1833,6 +1839,9 @@ def create_device_mesh(
         num_devices % num_granules == 0
     ), "Number of devices must be divisible by number of granules."
     num_devices_per_granule = num_devices // num_granules
+    print(f"Num Granules by camilo: {num_granules}")
+    print(f"Num Devices by camilo: {num_devices}")
+    print(f"Num Devices per Granule by camilo: {num_devices_per_granule}")
 
     # Fallback to a standard mesh if on GPU with incompatible multi-granule mesh.
     if (
@@ -1897,6 +1906,8 @@ def create_device_mesh(
     # Return a standard mesh if not a multi-granule env.
     if num_granules == 1:
         return build_standard_mesh(mesh_shape.ici_mesh_shape, devices=devices)
+
+    print(f"Mesh shape CREATE DEVICE MESH by camilo: {devices}")
 
     return create_hybrid_device_mesh(
         mesh_shape,
