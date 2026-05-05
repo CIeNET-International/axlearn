@@ -3,6 +3,7 @@
 """Main function for launching the trainer."""
 
 import pathwaysutils
+import functools
 from absl import app, flags
 from pathwaysutils.elastic import elastic, manager
 
@@ -17,10 +18,10 @@ enable_replica_resize = True
 def main(_):
     measurement.initialize(flags.FLAGS)
     launch.setup()
-    # trainer_config = launch_trainer.get_trainer_config()
+    trainer_config = launch_trainer.get_trainer_config()
     # trainer_config.set(recorder=config_for_function(lambda: measurement.global_recorder))
     # measurement.start_monitoring()
-
+    clean_up_checkpoints = functools.partial(utils.clean_up_checkpoints, checkpoint_dir=trainer_config.dir)
     if pathwaysutils.is_pathways_backend_used() and enable_elastic_training:
 
         def train():
@@ -69,6 +70,7 @@ def main(_):
                 max_resizes=10,  # Handle up to 10 slice up or slice down transitions
                 poll_interval=30,  # Monitor thread checks inactive slice health every 30 seconds
                 pre_callback=pre_callback,
+                on_elastic_event_callback=clean_up_checkpoints,
             )(train)
 
         train()

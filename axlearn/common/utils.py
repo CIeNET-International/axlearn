@@ -28,6 +28,7 @@ import types
 from collections.abc import Mapping, Sequence
 from enum import Enum
 from functools import cache
+import subprocess
 from typing import (
     Any,
     Callable,
@@ -109,6 +110,39 @@ def live_devices():
 def live_slice_indices() -> set[int]:
     return {d.slice_index for d in live_devices()}
 
+def clean_up_checkpoints(checkpoint_dir: str):
+
+  print(f"Checking for incomplete checkpoint after an elastic event...Check dir: {checkpoint_dir}")
+
+  # 1. List the directory
+  new_checkpoint_dir = f"{checkpoint_dir}/checkpoints/"
+  result = subprocess.run(['gsutil', 'ls', new_checkpoint_dir], capture_output=True, text=True)
+
+  if result.returncode != 0:
+    print("Failed to inspect checkpoint dir. Continuing")
+    return
+  print(f"Checkpoints==> {[line for line in result.stdout.splitlines()]}")
+  checkpoints = [line for line in result.stdout.splitlines()]
+
+  if not checkpoints:
+    print("Found no existing checkpoints. Continuing")
+    return
+
+  # Sort naturally (Version sort) and get the last one
+  checkpoints.sort(key=lambda x: [int(c) if c.isdigit() else c for c in re.split(r'(\d+)', x)])
+  latest_checkpoint = checkpoints[-1]
+
+  print(f"Checking latest checkpoint: {latest_checkpoint}")
+
+  # 3. Check for commit_success file
+  # gsutil -q stat returns 0 if found, non-zero if not
+  stat_check = subprocess.run(['gsutil', '-q', 'stat', f"{latest_checkpoint}commit_success*"])
+
+  if stat_check.returncode != 0:
+    print(f"No commit_success file found. Deleting {latest_checkpoint}...")
+    subprocess.run(['gsutil', '-m', 'rm', '-rf', latest_checkpoint])
+  else:
+    print(f"Found commit_success file. Keeping {latest_checkpoint}.")
 
 @dataclasses.dataclass
 class HybridMeshShape:
