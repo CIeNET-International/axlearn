@@ -109,7 +109,7 @@ gcp = [
 tpu = [
     "axlearn[gcp]",
     "jax[tpu]==0.10.0",  # must be >=0.4.19 for compat with v5p.
-    "pathwaysutils==0.1.2",  # For JAX+Pathways single-controller accelerator coordinator.
+    "pathwaysutils @ git+https://github.com/AI-Hypercomputer/pathways-utils.git",
 ]
 # Vertex AI tensorboard. TODO(markblee): Merge with `gcp`.
 vertexai_tensorboard = [
@@ -173,6 +173,9 @@ version.fallback-version = "0.0.0"
 build.targets.wheel.exclude = ["**/BUILD", "axlearn/experiments/testdata"]
 # This is where the code is for historical reasons.
 build.targets.wheel.packages = ["axlearn"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.pytype]
 inputs = ["axlearn"]
