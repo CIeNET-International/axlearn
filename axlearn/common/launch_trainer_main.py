@@ -2,6 +2,7 @@
 
 """Main function for launching the trainer."""
 
+import os
 import pathwaysutils
 import functools
 from absl import app, flags
@@ -10,9 +11,10 @@ from pathwaysutils.elastic import elastic, manager
 from axlearn.common import launch, launch_trainer, measurement, utils
 from axlearn.common.config import config_for_function
 
-enable_elastic_training = True
-enable_pause_resume = False
-enable_replica_resize = True
+
+# Env variables to control Elastic training functionality
+ENABLED_PAUSE_RESUME = os.environ['ENABLED_PAUSE_RESUME'] if "ENABLED_PAUSE_RESUME" in os.environ else False
+ENABLED_REPLICA_RESIZE = os.environ['ENABLED_REPLICA_RESIZE'] if "ENABLED_REPLICA_RESIZE" in os.environ else False
 
 
 def main(_):
@@ -22,8 +24,9 @@ def main(_):
     # trainer_config.set(recorder=config_for_function(lambda: measurement.global_recorder))
     # measurement.start_monitoring()
     clean_up_checkpoints = functools.partial(utils.clean_up_checkpoints, checkpoint_dir=trainer_config.dir)
-    if pathwaysutils.is_pathways_backend_used() and enable_elastic_training:
-
+    enabled_elastic_training = True if ENABLED_PAUSE_RESUME or ENABLED_REPLICA_RESIZE else False
+    if pathwaysutils.is_pathways_backend_used() and enabled_elastic_training:
+        print("Pathways backend with elastic training being used")
         def train():
             # measurement.initialize(flags.FLAGS)
             # launch.setup()
@@ -36,7 +39,7 @@ def main(_):
 
         # utils.elastic_manager.live_devices = live_devices()
 
-        if enable_pause_resume:
+        if ENABLED_PAUSE_RESUME:
             print("Pathways backend with pause resume being used")
             train = utils.elastic_manager.pause_resume(
                 max_retries=10,  # Handle up to 10 disruptions before restarting
@@ -45,8 +48,8 @@ def main(_):
                 # on_elastic_event_callback=clean_up_checkpoints,
             )(train)
 
-        if enable_replica_resize:
-
+        if ENABLED_REPLICA_RESIZE:
+            print("Pathways backend with replica resize being used")
             def pre_callback():
                 # Wait up to 1 minute before starting if there are any inactive slices
                 if utils.elastic_manager.inactive_slice_indices:
