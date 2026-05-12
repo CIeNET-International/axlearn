@@ -44,7 +44,7 @@ def main(_):
             train = utils.elastic_manager.pause_resume(
                 max_retries=10,  # Handle up to 10 disruptions before restarting
                 poll_interval=10,  # While paused, checks every 10 seconds for health
-                timeout=300,  # Waits for slices to rejoin for 5 minutes
+                timeout=1600,  # Waits for slices to rejoin for 20 minutes
                 # on_elastic_event_callback=clean_up_checkpoints,
             )(train)
 
