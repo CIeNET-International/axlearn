@@ -33,6 +33,7 @@ core = [
     "optax==0.2.6",  # Fix for TPU 7x
     "portpicker",
     "pyarrow<21.0.0",  # Pin to v20.x to avoid PyExtensionType -> ExtensionType breaking change in v21
+    "pathwaysutils @ git+https://github.com/AI-Hypercomputer/pathways-utils.git",
     "protobuf>4",
     "tensorboard-plugin-profile==2.20.4",
     # This has both x86 and arm64 wheels. Underneath the hood it uses tensorflow-macos since 2.13.
