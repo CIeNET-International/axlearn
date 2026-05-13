@@ -15,6 +15,12 @@ from tempfile import mkdtemp
 from typing import Any, NamedTuple, Optional, Protocol, TypeVar, Union
 from unittest.mock import patch
 
+# For bypass pathwaysutil import error
+import sys
+from unittest.mock import MagicMock
+fakePathwaysuitls = MagicMock()
+sys.modules['pathwaysutils'] = fakePathwaysuitls
+
 import jax
 import jax.random
 import numpy as np
