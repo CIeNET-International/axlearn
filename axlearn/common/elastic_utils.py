@@ -128,6 +128,15 @@ def live_slice_indices() -> set[int]:
     return {getattr(d, "slice_index", 0) for d in live_devices()}
 
 
+def total_cluster_slices() -> int:
+    """Returns the total number of provisioned slices in the cluster topology."""
+    global _elastic_manager
+    if _elastic_manager is not None and getattr(_elastic_manager, "slice_to_devices", None):
+        return len(_elastic_manager.slice_to_devices)
+    devs = jax.devices()
+    return max(1, len(set(getattr(d, "slice_index", 0) for d in devs if d is not None)))
+
+
 def wait_for_slices(slice_count: int, timeout_seconds: int = 300):
     """Waits for at least slice_count slices to be active."""
     if not _is_pathways_active():
@@ -493,12 +502,13 @@ def _slice_monitor_context(elastic_manager: Any, original_slices: int):
         try:
             elastic = _get_pathways_elastic()
             if elastic:
+                total_slices = len(elastic_manager.slice_to_devices) if elastic_manager.slice_to_devices else original_slices
                 active_slices = elastic.get_active_slice_indices(elastic_manager.slice_to_devices)
-                if len(active_slices) < original_slices:
+                if len(active_slices) < total_slices:
                     logging.info(
-                        "[ELASTIC] Degraded mode detected (active: %s, target: %d). Starting monitor...",
+                        "[ELASTIC] Degraded mode detected (active: %s, total: %d). Starting monitor...",
                         active_slices,
-                        original_slices,
+                        total_slices,
                     )
 
                     def monitor_loop():

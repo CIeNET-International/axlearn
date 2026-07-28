@@ -784,6 +784,7 @@ class SpmdTrainer(Module):
                                 self._step_log("[ELASTIC] Start step")
                                 logging.info("[ELASTIC] Start step %s", self.step)
                                 self._maybe_record_event(measurement.Event.START_STEP, self._step)
+                                step_start_time = time.perf_counter()
                                 output = self._run_step(
                                     utils.host_to_global_array(
                                         input_batch,
@@ -794,6 +795,12 @@ class SpmdTrainer(Module):
                                         if self.step >= cfg.max_step
                                         else None
                                     ),
+                                )
+                                step_duration = time.perf_counter() - step_start_time
+                                logging.info(
+                                    "[ELASTIC] [TIMING] step=%s step_time_sec=%.4f",
+                                    self.step,
+                                    step_duration,
                                 )
                                 self._step_log("[ELASTIC] Done step")
                                 logging.info("[ELASTIC] Done step %s", self.step)

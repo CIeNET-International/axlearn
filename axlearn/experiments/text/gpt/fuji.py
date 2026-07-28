@@ -48,11 +48,10 @@ from axlearn.common.trainer_config_modifier import (
     PartitionSpecModifier,
     RematSpecModifier,
 )
-from axlearn.common.elastic_utils import live_devices
 from axlearn.common.utils import (
-    HybridMeshShape,
     combine_remat_policies,
     extended_checkpoint_policies,
+    live_devices,
     save_and_offload_only_these_names_regex,
 )
 from axlearn.experiments.text.gpt.common import (
@@ -344,7 +343,7 @@ def get_trainer_kwargs(
                             MeshShapeModifier.default_config().set(
                                 # TP within the chip, FSDP across chips.
                                 # Each TRN2 chip has 4 XLA cores.
-                                mesh_shape=mesh_shape_from_axes(fsdp=-32, model=4)
+                                mesh_shape=mesh_shape_from_axes(fsdp=-1, model=4)
                             ),
                             *trn2_config.module_modifications,
                             *trn2_config.partition_spec_modifications,
@@ -404,7 +403,7 @@ def get_trainer_kwargs(
             ),
             learner_kwargs=dict(peak_lr=3e-4, weight_decay=0.1),
             max_sequence_length=max_sequence_length,
-            train_batch_size=len(jax.devices()),#train_batch_size,
+            train_batch_size=len(live_devices()),#train_batch_size,
             max_step=max_step,
             mesh_shape=mesh_shape_from_axes(data=-1, fsdp=8),
             mesh_rules=(
@@ -441,33 +440,8 @@ def get_trainer_kwargs(
                     "tpu-v5litepod-32",
                     ChainConfigModifier.default_config().set(
                         config_modifiers=[
-                            # REPLACE the MeshShapeModifier with this:
                             MeshShapeModifier.default_config().set(
-                                mesh_shape=HybridMeshShape(
-                                    ici_mesh_shape=mesh_shape_from_axes(fsdp=32),
-                                    dcn_mesh_shape=mesh_shape_from_axes(data=2),
-                                )
-                            ),
-                            RematSpecModifier.default_config().set(
-                                remat_policies={
-                                    "model.decoder.transformer.layer": RematSpec(
-                                        # Force the compiler to respect our remat boundaries
-                                        prevent_cse=True,
-                                        # Maximum memory savings: recompute everything
-                                        policy=jax_remat_policies.nothing_saveable,
-                                    ),
-                                }
-                            ),
-                            FlashBlockSizeModifier.default_config().set(tpu_block_size=256),
-                        ],
-                    ),
-                ),
-                (
-                    "tpu-v5litepod-64",
-                    ChainConfigModifier.default_config().set(
-                        config_modifiers=[
-                            MeshShapeModifier.default_config().set(
-                                mesh_shape=mesh_shape_from_axes(fsdp=64, data=-1)
+                                mesh_shape=mesh_shape_from_axes(fsdp=32, data=-1)
                             ),
                             RematSpecModifier.default_config().set(
                                 remat_policies={
@@ -488,37 +462,6 @@ def get_trainer_kwargs(
                                     ),
                                 }
                             ),
-                            FlashBlockSizeModifier.default_config().set(tpu_block_size=256),
-                        ],
-                    ),
-                ),
-                (
-                    "tpu-v5p-128",
-                    ChainConfigModifier.default_config().set(
-                        config_modifiers=[
-                            MeshShapeModifier.default_config().set(
-                                mesh_shape=mesh_shape_from_axes(fsdp=64, data=-1)
-                            ),
-                            RematSpecModifier.default_config().set(
-                                remat_policies={
-                                    "model.decoder.transformer.layer": RematSpec(
-                                        prevent_cse=False,
-                                        policy=config_for_function(
-                                            save_and_offload_only_these_names_regex
-                                        ).set(
-                                            names_which_can_be_saved=(
-                                                RematRegexSavePatterns.QKV_PROJ.value
-                                            ),
-                                            names_which_can_be_offloaded=(
-                                                RematRegexSavePatterns.INPUT.value
-                                            ),
-                                            offload_src="device",
-                                            offload_dst="pinned_host",
-                                        ),
-                                    ),
-                                }
-                            ),
-                            #FlashBlockSizeModifier.default_config().set(tpu_block_size=256),
                         ],
                     ),
                 ),

@@ -28,6 +28,7 @@ from axlearn.common.elastic_utils import (
     is_retryable_error,
     live_devices,
     set_elastic_manager,
+    total_cluster_slices,
     wait_for_all_devices,
     wait_for_slices,
 )
@@ -237,7 +238,7 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
 
     elastic_manager = None
     elastic_manager_initialized = False
-    original_slices = trainer_config.mesh_shape[0] if hasattr(trainer_config, "mesh_shape") and isinstance(trainer_config.mesh_shape, (tuple, list)) and len(trainer_config.mesh_shape) > 0 else 2
+    original_slices = total_cluster_slices()
 
     output = None
     jax_device_state = {}
