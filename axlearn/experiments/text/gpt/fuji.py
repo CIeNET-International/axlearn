@@ -837,7 +837,7 @@ def get_trainer_kwargs(
                 ),
                 # V2 on tpu-v6e-256x4, step time: 4.9s.
                 (
-                    "tpu-v6e-256-(4|8)",
+                    "tpu-v6e-256-(2|4|8)",
                     ChainConfigModifier.default_config().set(
                         config_modifiers=[
                             MeshShapeModifier.default_config().set(
