@@ -4,6 +4,9 @@
 
 import json
 import os
+import time
+import signal
+import sys
 from typing import Any, Optional
 
 import jax
@@ -190,7 +193,34 @@ def get_trainer_config(
 
 
 def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
+    original_sigterm_handler = signal.getsignal(signal.SIGTERM)
+    def sigterm_handler(signum, frame):
+        logging.info("[ELASTIC] [SIGTERM] SIGTERM signal received at Unix timestamp: %f", time.time())
+        if callable(original_sigterm_handler):
+            original_sigterm_handler(signum, frame)
+        else:
+            sys.exit(143)
+    signal.signal(signal.SIGTERM, sigterm_handler)
+
+    t_reinit_start = time.perf_counter()
     measurement.record_event(measurement.Event.START_JOB)
+    
+    # Detect recovery
+    is_recovery = False
+    try:
+        ckpt_dir = os.path.join(trainer_config.dir, "checkpoints")
+        if fs.isdir(ckpt_dir) and fs.listdir(ckpt_dir):
+             is_recovery = True
+             logging.info("[ELASTIC] Detected existing checkpoints. Marking this run as a recovery run.")
+    except Exception as e:
+         logging.debug("Failed to check if checkpoints exist: %s", e)
+
+    if is_recovery:
+         measurement.record_event(
+             measurement.Event.START_CUSTOM_BADPUT_EVENT,
+             custom_badput_event_type="elastic_reinitialization"
+         )
+
     trainer_config_debug_string = trainer_config.debug_string()
     logging.info("Trainer config:\n%s", trainer_config_debug_string)
     if jax.process_index() == 0:
@@ -209,6 +239,9 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
             )
 
     trainer: SpmdTrainer = trainer_config.instantiate(parent=None)
+    if is_recovery:
+        trainer._elastic_reinit_start_time = t_reinit_start
+
     prng_key = jax.random.PRNGKey(seed=FLAGS.trainer_prng_seed)
     output = trainer.run(prng_key)
     measurement.record_event(measurement.Event.END_JOB)
