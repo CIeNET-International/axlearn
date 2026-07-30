@@ -304,9 +304,14 @@ def sync_restore_class_vars(
     if snapshot_mgr is not None:
         with mesh:
             try:
+                t_load_pytree_start = time.perf_counter()
                 restored_trainer_state = snapshot_mgr.load_pytree(
                     abstract_state=fresh_trainer._trainer_state_specs,
                     reset_snapshot_state=False
+                )
+                logging.info(
+                    "[ELASTIC] [TIMING] In-memory snapshot restore took %.3f seconds",
+                    time.perf_counter() - t_load_pytree_start
                 )
                 snapshot_mgr.trainer_state_specs = fresh_trainer._trainer_state_specs
                 fresh_trainer._trainer_state = restored_trainer_state

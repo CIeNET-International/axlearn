@@ -8,6 +8,8 @@ import time
 import gc
 import threading
 import contextlib
+import signal
+import sys
 from typing import Any, Optional
 
 import jax
@@ -215,6 +217,15 @@ def get_trainer_config(
 
 
 def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
+    original_sigterm_handler = signal.getsignal(signal.SIGTERM)
+    def sigterm_handler(signum, frame):
+        logging.info("[ELASTIC] [SIGTERM] SIGTERM signal received at Unix timestamp: %f", time.time())
+        if callable(original_sigterm_handler):
+            original_sigterm_handler(signum, frame)
+        else:
+            sys.exit(143)
+    signal.signal(signal.SIGTERM, sigterm_handler)
+
     measurement.record_event(measurement.Event.START_JOB)
     trainer_config_debug_string = trainer_config.debug_string()
     logging.info("Trainer config:\n%s", trainer_config_debug_string)
@@ -282,6 +293,10 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
                 with (recovery_timer.time_subtask("3_snapshot_restore_and_hardware_barrier") if recovery_timer else contextlib.nullcontext()):
                     trainer, prng_key = sync_restore_class_vars(clean_trainer, jax_device_state, python_vars, immutable_data)
                 
+                if "_elastic_reinit_start_time" in python_vars:
+                    trainer._elastic_reinit_start_time = python_vars["_elastic_reinit_start_time"]
+                    del python_vars["_elastic_reinit_start_time"]
+                
                 logging.info("[ELASTIC] [RECOVERY PHASE 1 COMPLETE] Successfully restored trainer state from class variables.")
                 if recovery_timer:
                     recovery_timer.log_summary()
@@ -303,6 +318,13 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
             from axlearn.common.utils import ScaleUpSignal
             if isinstance(output, ScaleUpSignal):
                 logging.info("[ELASTIC] Scale-up signal received! Initiating transition to expanded mesh...")
+                
+                t_stabilize_start = time.perf_counter()
+                measurement.record_event(
+                    measurement.Event.START_CUSTOM_BADPUT_EVENT,
+                    custom_badput_event_type="elastic_scale_up"
+                )
+                
                 python_vars, jax_device_state, immutable_data = _teardown_and_preserve_state(
                     trainer, python_vars, jax_device_state, immutable_data
                 )
@@ -322,6 +344,23 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
 
                 logging.info("[ELASTIC] Waiting for %d slices to be active for scale-up...", target_slices)
                 wait_for_slices(target_slices)
+                
+                measurement.record_event(
+                    measurement.Event.END_CUSTOM_BADPUT_EVENT,
+                    custom_badput_event_type="elastic_scale_up"
+                )
+                logging.info(
+                    "[ELASTIC] [TIMING] TPU Slice stabilization took %.3f seconds",
+                    time.perf_counter() - t_stabilize_start
+                )
+                
+                t_reinit_start = time.perf_counter()
+                measurement.record_event(
+                    measurement.Event.START_CUSTOM_BADPUT_EVENT,
+                    custom_badput_event_type="elastic_reinitialization"
+                )
+                python_vars["_elastic_reinit_start_time"] = t_reinit_start
+                
                 continue
 
             measurement.record_event(measurement.Event.END_JOB)
@@ -339,6 +378,13 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
                 logging.warning(
                     "[ELASTIC] Caught retryable error: %s. Initiating in-memory state preservation and TPU cleanup...", e
                 )
+                
+                t_stabilize_start = time.perf_counter()
+                measurement.record_event(
+                    measurement.Event.START_CUSTOM_BADPUT_EVENT,
+                    custom_badput_event_type="elastic_scale_up"
+                )
+                
                 python_vars, jax_device_state, immutable_data = _teardown_and_preserve_state(
                     trainer, python_vars, jax_device_state, immutable_data
                 )
@@ -363,6 +409,23 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
                     elastic_manager.new_slice_event.set()
                 
                 wait_for_slices(1)
+                
+                measurement.record_event(
+                    measurement.Event.END_CUSTOM_BADPUT_EVENT,
+                    custom_badput_event_type="elastic_scale_up"
+                )
+                logging.info(
+                    "[ELASTIC] [TIMING] TPU Slice stabilization took %.3f seconds",
+                    time.perf_counter() - t_stabilize_start
+                )
+                
+                t_reinit_start = time.perf_counter()
+                measurement.record_event(
+                    measurement.Event.START_CUSTOM_BADPUT_EVENT,
+                    custom_badput_event_type="elastic_reinitialization"
+                )
+                python_vars["_elastic_reinit_start_time"] = t_reinit_start
+                
                 continue
             else:
                 logging.error("[ELASTIC] Caught non-retryable error: %s", e)
