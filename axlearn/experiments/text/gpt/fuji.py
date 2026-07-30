@@ -51,7 +51,6 @@ from axlearn.common.trainer_config_modifier import (
 from axlearn.common.utils import (
     combine_remat_policies,
     extended_checkpoint_policies,
-    live_devices,
     save_and_offload_only_these_names_regex,
 )
 from axlearn.experiments.text.gpt.common import (
@@ -403,7 +402,7 @@ def get_trainer_kwargs(
             ),
             learner_kwargs=dict(peak_lr=3e-4, weight_decay=0.1),
             max_sequence_length=max_sequence_length,
-            train_batch_size=len(live_devices()),#train_batch_size,
+            train_batch_size=train_batch_size,
             max_step=max_step,
             mesh_shape=mesh_shape_from_axes(data=-1, fsdp=8),
             mesh_rules=(
