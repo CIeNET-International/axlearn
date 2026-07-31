@@ -39,6 +39,7 @@ from axlearn.common.attention import (
 )
 from axlearn.common.base_layer import RematSpec
 import jax
+from axlearn.common.elastic_utils import live_devices
 from axlearn.common.config import TrainerConfigFn, config_for_function
 from axlearn.common.embedding import TransformerTextEmbeddings
 from axlearn.common.layers import RMSNorm
@@ -181,7 +182,7 @@ def get_trainer_kwargs(
             ),
             learner_kwargs=dict(peak_lr=0.01, weight_decay=1e-4, lr_warmup_steps=5_000),
             max_sequence_length=max_sequence_length,
-            train_batch_size=tokens_per_batch // max_sequence_length,  # 8M tokens.
+            train_batch_size=len(live_devices()),#tokens_per_batch // max_sequence_length,  # 8M tokens.
             max_step=250_000,
             mesh_shape=mesh_shape_from_axes(fsdp=-1, expert=16),
             mesh_rules=(
@@ -486,7 +487,7 @@ def get_trainer_kwargs(
             ),
             learner_kwargs=dict(peak_lr=0.01, weight_decay=1e-4, lr_warmup_steps=5_000),
             max_sequence_length=max_sequence_length,
-            train_batch_size=tokens_per_batch // max_sequence_length,  # 8M tokens.
+            train_batch_size=len(live_devices()),#tokens_per_batch // max_sequence_length,  # 8M tokens.
             max_step=250_000,  # Most of the evals were done at 100k steps in the paper.
             # TODO(kelvin-zou): not verified with real job.
             mesh_shape=mesh_shape_from_axes(fsdp=-1, expert=16, model=8),
