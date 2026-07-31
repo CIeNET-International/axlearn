@@ -48,7 +48,9 @@ from axlearn.common.trainer_config_modifier import (
     PartitionSpecModifier,
     RematSpecModifier,
 )
+from axlearn.common.elastic_utils import live_devices
 from axlearn.common.utils import (
+    HybridMeshShape,
     combine_remat_policies,
     extended_checkpoint_policies,
     save_and_offload_only_these_names_regex,
@@ -439,8 +441,33 @@ def get_trainer_kwargs(
                     "tpu-v5litepod-32",
                     ChainConfigModifier.default_config().set(
                         config_modifiers=[
+                            # REPLACE the MeshShapeModifier with this:
                             MeshShapeModifier.default_config().set(
-                                mesh_shape=mesh_shape_from_axes(fsdp=32, data=-1)
+                                mesh_shape=HybridMeshShape(
+                                    ici_mesh_shape=mesh_shape_from_axes(fsdp=32),
+                                    dcn_mesh_shape=mesh_shape_from_axes(data=2),
+                                )
+                            ),
+                            RematSpecModifier.default_config().set(
+                                remat_policies={
+                                    "model.decoder.transformer.layer": RematSpec(
+                                        # Force the compiler to respect our remat boundaries
+                                        prevent_cse=True,
+                                        # Maximum memory savings: recompute everything
+                                        policy=jax_remat_policies.nothing_saveable,
+                                    ),
+                                }
+                            ),
+                            FlashBlockSizeModifier.default_config().set(tpu_block_size=256),
+                        ],
+                    ),
+                ),
+                (
+                    "tpu-v5litepod-64",
+                    ChainConfigModifier.default_config().set(
+                        config_modifiers=[
+                            MeshShapeModifier.default_config().set(
+                                mesh_shape=mesh_shape_from_axes(fsdp=64, data=-1)
                             ),
                             RematSpecModifier.default_config().set(
                                 remat_policies={
@@ -461,6 +488,37 @@ def get_trainer_kwargs(
                                     ),
                                 }
                             ),
+                            FlashBlockSizeModifier.default_config().set(tpu_block_size=256),
+                        ],
+                    ),
+                ),
+                (
+                    "tpu-v5p-128",
+                    ChainConfigModifier.default_config().set(
+                        config_modifiers=[
+                            MeshShapeModifier.default_config().set(
+                                mesh_shape=mesh_shape_from_axes(fsdp=64, data=-1)
+                            ),
+                            RematSpecModifier.default_config().set(
+                                remat_policies={
+                                    "model.decoder.transformer.layer": RematSpec(
+                                        prevent_cse=False,
+                                        policy=config_for_function(
+                                            save_and_offload_only_these_names_regex
+                                        ).set(
+                                            names_which_can_be_saved=(
+                                                RematRegexSavePatterns.QKV_PROJ.value
+                                            ),
+                                            names_which_can_be_offloaded=(
+                                                RematRegexSavePatterns.INPUT.value
+                                            ),
+                                            offload_src="device",
+                                            offload_dst="pinned_host",
+                                        ),
+                                    ),
+                                }
+                            ),
+                            #FlashBlockSizeModifier.default_config().set(tpu_block_size=256),
                         ],
                     ),
                 ),
@@ -836,7 +894,7 @@ def get_trainer_kwargs(
                 ),
                 # V2 on tpu-v6e-256x4, step time: 4.9s.
                 (
-                    "tpu-v6e-256-(2|4|8)",
+                    "tpu-v6e-256-(4|8)",
                     ChainConfigModifier.default_config().set(
                         config_modifiers=[
                             MeshShapeModifier.default_config().set(
