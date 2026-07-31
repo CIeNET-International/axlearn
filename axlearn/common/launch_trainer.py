@@ -215,11 +215,7 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
     except Exception as e:
          logging.debug("Failed to check if checkpoints exist: %s", e)
 
-    if is_recovery:
-         measurement.record_event(
-             measurement.Event.START_CUSTOM_BADPUT_EVENT,
-             custom_badput_event_type="elastic_reinitialization"
-         )
+
 
     trainer_config_debug_string = trainer_config.debug_string()
     logging.info("Trainer config:\n%s", trainer_config_debug_string)
