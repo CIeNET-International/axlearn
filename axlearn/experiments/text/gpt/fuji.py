@@ -47,8 +47,6 @@ from axlearn.common.trainer_config_modifier import (
     ModuleConfigModifier,
     PartitionSpecModifier,
     RematSpecModifier,
-)
-from axlearn.common.elastic_utils import live_devices
 from axlearn.common.utils import (
     HybridMeshShape,
     combine_remat_policies,
