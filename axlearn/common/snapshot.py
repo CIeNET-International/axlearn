@@ -230,7 +230,7 @@ class Snapshotter:
     if not isinstance(mesh, jax.sharding.Mesh):
         raise RuntimeError(f"Expected a jax.sharding.Mesh, got {mesh}")
     
-    def get_active_pytree(x, spec):
+    def get_active_pytree_fallback(x, spec):
       if not isinstance(x, jax.Array) or not hasattr(x.sharding, "mesh"):
         return x
 
@@ -313,6 +313,53 @@ class Snapshotter:
           _logger.warning("[ELASTIC] Host buffer coordinate assembly failed (%s), taking primitive shard fallback.", fallback_err)
 
       return x
+
+    def get_active_pytree(x, spec):
+      if not isinstance(x, jax.Array) or not hasattr(x.sharding, "mesh"):
+        return x
+
+      use_split_fallback = True
+      try:
+        mesh_axis_name = x.sharding.mesh.axis_names[self.replica_axis_index]
+        source_mesh = x.sharding.mesh
+        target_mesh = getattr(getattr(spec, "sharding", None), "mesh", None)
+        is_scale_up = False
+        if target_mesh is not None:
+            source_replicas = source_mesh.shape.get(mesh_axis_name, 1)
+            target_replicas = target_mesh.shape.get(mesh_axis_name, 1)
+            if target_replicas > source_replicas:
+                is_scale_up = True
+                _logger.info("[ELASTIC] Scale-up detected (replicas: %d -> %d). Bypassing JAX-native replica split.", source_replicas, target_replicas)
+
+        if not is_scale_up:
+            from pathwaysutils.experimental import split_by_mesh_axis
+            all_replicas = split_by_mesh_axis.split_by_mesh_axis(
+                x,
+                mesh_axis_name,
+            )
+            
+            def is_replica_active(arr):
+              try:
+                jax.block_until_ready(arr)
+                return True
+              except jax.errors.JaxRuntimeError:
+                return False
+
+            active_replicas = [
+                replica for replica in all_replicas if is_replica_active(replica)
+            ]
+
+            if active_replicas:
+              reconstructed_state = active_replicas[0]
+              use_split_fallback = False
+              return reconstructed_state
+            else:
+              _logger.warning("[ELASTIC] No active replicas found via split. Trying coordinate fallback.")
+      except Exception as e:
+        _logger.warning("[ELASTIC] JAX-native replica split failed: %s. Trying coordinate fallback.", e)
+
+      if use_split_fallback:
+        return get_active_pytree_fallback(x, spec)
 
     _logger.info("[ELASTIC] Extracting active replicas and addressable shards from pinned state...")
     reconstructed_state = jax.tree.map(get_active_pytree, pinned_state, abstract_state)

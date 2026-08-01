@@ -113,6 +113,16 @@ def live_devices():
         )
         active_slice_indices = getattr(_elastic_manager, "active_slice_indices", set())
 
+    if active_slice_indices and hasattr(_elastic_manager, "default_device"):
+        try:
+            default_device = _elastic_manager.default_device
+            if default_device:
+                jax.config.update("jax_default_device", default_device)
+                logging.info("[ELASTIC] Updated jax_default_device to: %s", default_device)
+        except Exception as e:
+            logging.warning("[ELASTIC] Failed to update jax_default_device: %s", e)
+
+
     active_devices = [
         d for d in device_list if d is not None and getattr(d, "slice_index", 0) in active_slice_indices
     ]
