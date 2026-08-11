@@ -7,6 +7,7 @@ import io
 import json
 import logging
 import os
+import re
 from typing import Any, Optional, Sequence, Union
 
 from absl import flags
@@ -604,7 +605,13 @@ class PathwaysReplicatedJob(BaseReplicatedJob):
         # If multi-head, every pathways-head will only
         # be connected to one pathways instance (a pathways-worker replicated job).
         pathways_instance_count = cfg.accelerator.num_replicas if self._is_single_head else 1
-        num_elastic_slices = cfg.accelerator.num_replicas
+
+        # Extract num_elastic_slices from user command if specified, else default to 1.
+        num_elastic_slices = 1
+        command_str = str(getattr(cfg, "command", ""))
+        match = re.search(r"--num_elastic_slices[=\s]+(\d+)", command_str)
+        if match:
+            num_elastic_slices = int(match.group(1))
 
         cmd_args = [
             f"--resource_manager_address=localhost:{_PATHWAYS_RESOURCE_MANAGER_PORT}",

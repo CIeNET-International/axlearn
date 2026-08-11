@@ -23,10 +23,10 @@ from axlearn.common import elastic_utils
 from axlearn.common import utils
 from axlearn.common.elastic_utils import (
     ElasticRecoveryTimer,
-    _cleanup_live_arrays,
     _slice_monitor_context,
     _teardown_and_preserve_state,
     create_elastic_manager,
+    handle_preemption_recovery,
     is_retryable_error,
     live_devices,
     set_elastic_manager,
@@ -137,6 +137,11 @@ flags.DEFINE_string(
     "mesh_selector",
     None,
     "The mesh selector string. See `SpmdTrainer.Config.mesh_rules` for details.",
+)
+flags.DEFINE_integer(
+    "num_elastic_slices",
+    1,
+    "Minimum number of active slices required to continue training without pausing.",
 )
 
 FLAGS = flags.FLAGS
@@ -393,11 +398,7 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
                 )
                 time.sleep(backoff_delay)
                 
-                if elastic_manager:
-                    elastic_manager.new_slice_event.set()
-                
-                wait_for_slices(1)
-                
+                handle_preemption_recovery(elastic_manager, required_slices=FLAGS.num_elastic_slices)
 
                 logging.info(
                     "[ELASTIC] [TIMING] TPU Slice stabilization took %.3f seconds",

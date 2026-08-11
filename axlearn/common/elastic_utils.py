@@ -107,21 +107,15 @@ def live_devices():
         elastic = _get_pathways_elastic()
         active_slice_indices = elastic.get_active_slice_indices(_elastic_manager.slice_to_devices) if elastic else set()
         _elastic_manager.active_slice_indices = active_slice_indices
+        if active_slice_indices and hasattr(_elastic_manager, "default_device"):
+            default_device = _elastic_manager.default_device
+            jax.config.update("jax_default_device", default_device)
+            logging.info("[ELASTIC] Updated jax_default_device to: %s", default_device)
     except Exception as e:
         logging.warning(
             "[ELASTIC] Failed to get active slice indices: %s. Falling back to cached values.", e
         )
         active_slice_indices = getattr(_elastic_manager, "active_slice_indices", set())
-
-    if active_slice_indices and hasattr(_elastic_manager, "default_device"):
-        try:
-            default_device = _elastic_manager.default_device
-            if default_device:
-                jax.config.update("jax_default_device", default_device)
-                logging.info("[ELASTIC] Updated jax_default_device to: %s", default_device)
-        except Exception as e:
-            logging.warning("[ELASTIC] Failed to update jax_default_device: %s", e)
-
 
     active_devices = [
         d for d in device_list if d is not None and getattr(d, "slice_index", 0) in active_slice_indices
@@ -177,8 +171,72 @@ def wait_for_all_devices(timeout_seconds: int = 300):
     wait_for_slices(slice_count=expected_slices, timeout_seconds=timeout_seconds)
 
 
+def handle_preemption_recovery(
+    elastic_manager: Any,
+    required_slices: int = 1,
+    pause_timeout_seconds: int = 300,
+) -> int:
+    """Handles slice reconciliation after preemption: executes pause-and-resume or degraded continuation.
+
+    Args:
+        elastic_manager: The active Pathways Elastic Manager.
+        required_slices: Minimum slices required to run (defaults to 1).
+        pause_timeout_seconds: Timeout for pause-and-resume when live slices < required.
+
+    Returns:
+        The number of active slices ready for training.
+
+    Raises:
+        RuntimeError: If pause-and-resume times out waiting for required slices.
+    """
+    active_indices = live_slice_indices()
+    active_count = len(active_indices)
+
+    if active_count < required_slices:
+        logging.info(
+            "[ELASTIC] [PAUSE-AND-RESUME] Active slices (%d) < required threshold (%d). "
+            "Pausing in-memory and waiting up to %ds for slices to return...",
+            active_count,
+            required_slices,
+            pause_timeout_seconds,
+        )
+        try:
+            wait_for_slices(required_slices, timeout_seconds=pause_timeout_seconds)
+            logging.info("[ELASTIC] Slices recovered to %d! Resuming training from in-memory snapshot.", required_slices)
+            active_count = required_slices
+        except Exception as timeout_err:
+            logging.error(
+                "[ELASTIC] Preempted slices did not reach required threshold (%d) within %ds timeout. "
+                "Failing over to persistent checkpoint restart.",
+                required_slices,
+                pause_timeout_seconds,
+            )
+            raise RuntimeError(
+                f"Elastic pause-and-resume timed out waiting for {required_slices} slices. "
+                f"Restarting from persistent checkpoint."
+            ) from timeout_err
+    else:
+        logging.info(
+            "[ELASTIC] Active slices (%d) >= required threshold (%d). Proceeding with degraded recovery.",
+            active_count,
+            required_slices,
+        )
+        wait_for_slices(active_count, timeout_seconds=30)
+
+    if elastic_manager:
+        elastic_manager.new_slice_event.set()
+
+    return active_count
+
+
 class ScaleUpRequest(Exception):
     """Raised when a scale-up event is detected and training needs to be interrupted."""
+
+    pass
+
+
+class ScaleUpRestartRequired(RuntimeError):
+    """Raised when scale-up is detected and we need to restart the JobSet."""
 
     pass
 
@@ -235,6 +293,49 @@ EXCLUDED_KEYS = frozenset({
 RETRYABLE_KEYWORDS = ("data_loss", "unavailable", "unplaced", "slice down", "died")
 
 
+def safe_delete_arrays(pytree: Any) -> int:
+    """Safely deletes unique, non-pinned JAX arrays in a pytree, avoiding double-frees on aliased views.
+
+    Args:
+        pytree: A PyTree or collection of JAX arrays to delete.
+
+    Returns:
+        The number of unique arrays deleted.
+    """
+    if pytree is None:
+        return 0
+
+    seen_ids = set()
+    deleted_count = 0
+
+    for leaf in jax.tree_util.tree_leaves(pytree):
+        if not isinstance(leaf, jax.Array):
+            continue
+
+        leaf_id = id(leaf)
+        if leaf_id in seen_ids:
+            continue
+        seen_ids.add(leaf_id)
+
+        # Never delete host-pinned snapshot backups
+        if hasattr(leaf.sharding, "memory_kind") and leaf.sharding.memory_kind == "pinned_host":
+            continue
+
+        try:
+            if hasattr(leaf, "is_deleted") and leaf.is_deleted():
+                continue
+            leaf.delete()
+            deleted_count += 1
+        except Exception as e:
+            logging.debug("[ELASTIC] Ignored error during safe array delete: %s", e)
+
+    return deleted_count
+
+
+# Backward-compatible alias
+_cleanup_live_arrays = safe_delete_arrays
+
+
 def _inject_fresh_prng_key(
     trainer_state: Any,
     mesh: Any,
@@ -288,12 +389,6 @@ def sync_restore_class_vars(
     # Pop _trainer_state so fresh_trainer._jax_device_state won't retain old dead array references,
     # but keep old_state reference in local variable for Stage 2 fallback if needed.
     old_state = jax_device_state.pop("_trainer_state", None) if jax_device_state else None
-    if old_state is not None:
-        try:
-            jax.tree_util.tree_map(lambda x: x.delete() if isinstance(x, jax.Array) else None, old_state)
-            logging.info("[ELASTIC] Deleted pre-existing physical arrays from old state.")
-        except Exception as e:
-            logging.warning("[ELASTIC] Failed to delete pre-existing arrays: %s", e)
 
     state_restored = False
     latest_snapshot = python_vars.get("_latest_snapshot")
@@ -355,6 +450,10 @@ def sync_restore_class_vars(
 
     if not state_restored:
         raise RuntimeError("Elastic recovery triggered but failed to restore state from snapshot or globals.")
+
+    # Safely free old_state now that restoration onto the new mesh is complete
+    if old_state is not None:
+        safe_delete_arrays(old_state)
 
     fresh_trainer.snapshot_mgr = snapshot_mgr
     fresh_trainer._is_restored = state_restored
@@ -423,45 +522,6 @@ def sync_store_class_vars(obj: Any) -> tuple[dict, dict, dict]:
     return jax_device_state, python_vars, immutable_data
 
 
-def _cleanup_live_arrays(preserved_snapshot: Any):
-    active_array_ids = set()
-    if preserved_snapshot is not None:
-        try:
-            state = preserved_snapshot[0] if isinstance(preserved_snapshot, tuple) else preserved_snapshot
-            leaves = jax.tree_util.tree_leaves(state)
-            for leaf in leaves:
-                if isinstance(leaf, jax.Array):
-                    active_array_ids.add(id(leaf))
-        except Exception as e:
-            logging.warning("[ELASTIC] Failed to extract active array IDs from snapshot: %s", e)
-
-    try:
-        client_cpu_devices = set(jax.local_devices(backend="cpu"))
-    except Exception:
-        client_cpu_devices = set()
-
-    logging.info("[ELASTIC] Cleaning up live arrays, keeping snapshots and client-local CPU arrays...")
-    deleted_count = 0
-    for array in jax.live_arrays():
-        try:
-            if id(array) in active_array_ids:
-                continue
-            if hasattr(array.sharding, "memory_kind") and array.sharding.memory_kind == "pinned_host":
-                continue
-            try:
-                array_devs = set(array.devices())
-                if array_devs and array_devs.issubset(client_cpu_devices):
-                    continue
-            except Exception:
-                pass  # Err on the side of deleting
-
-            array.delete()
-            deleted_count += 1
-        except Exception as e:
-            logging.debug("[ELASTIC] Failed to delete array during cleanup: %s", e)
-    logging.info("[ELASTIC] Deleted %d temporary/remote arrays.", deleted_count)
-
-
 def _teardown_and_preserve_state(
     trainer: Any,
     python_vars: dict,
@@ -489,21 +549,17 @@ def _teardown_and_preserve_state(
 
         old_state = jax_device_state.pop("_trainer_state", None)
         if old_state is not None:
-            try:
-                jax.tree_util.tree_map(
-                    lambda x: x.delete() if isinstance(x, jax.Array) and hasattr(x, "delete") else None, old_state
-                )
-            except Exception as e:
-                logging.warning("[ELASTIC] Ignored error during old_state array delete: %s", e)
+            safe_delete_arrays(old_state)
 
         trainer._compiled_train_step = None
         trainer._jit_train_step = None
         trainer._mesh = None
+        trainer._trainer_state = None
+        trainer._learner_state = None
 
     clean_python_vars = {k: python_vars[k] for k in ("_latest_snapshot", "_step") if k in python_vars}
-    logging.info("[ELASTIC] Clearing JAX caches and live arrays before recovery/transition...")
+    logging.info("[ELASTIC] Clearing JAX caches and garbage collecting before recovery/transition...")
     jax.clear_caches()
-    _cleanup_live_arrays(clean_python_vars.get("_latest_snapshot"))
     gc.collect()
     return clean_python_vars, jax_device_state, immutable_data
 
