@@ -478,6 +478,14 @@ class TensorStoreStateStorage(StateStorage):
             )
         self._max_concurrent_restore_gb = cfg.max_concurrent_restore_gb or 32
         self._executor = futures.ThreadPoolExecutor()
+        
+        logging.info(
+            "[ELASTIC] TensorStoreStateStorage checkpointer initialized. "
+            "Max concurrent GB: %s, Max data shard degree: %s, Max concurrent restore GB: %s",
+            cfg.max_concurrent_gb,
+            cfg.max_data_shard_degree,
+            self._max_concurrent_restore_gb,
+        )
 
     @dataclasses.dataclass
     class CheckpointSpec:  # pylint: disable=too-many-instance-attributes

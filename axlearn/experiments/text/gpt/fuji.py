@@ -47,8 +47,6 @@ from axlearn.common.trainer_config_modifier import (
     ModuleConfigModifier,
     PartitionSpecModifier,
     RematSpecModifier,
-)
-from axlearn.common.elastic_utils import live_devices
 from axlearn.common.utils import (
     HybridMeshShape,
     combine_remat_policies,
@@ -404,7 +402,7 @@ def get_trainer_kwargs(
             ),
             learner_kwargs=dict(peak_lr=3e-4, weight_decay=0.1),
             max_sequence_length=max_sequence_length,
-            train_batch_size=len(live_devices()),#train_batch_size,
+            train_batch_size=len(jax.devices()),#train_batch_size,
             max_step=max_step,
             mesh_shape=mesh_shape_from_axes(data=-1, fsdp=8),
             mesh_rules=(

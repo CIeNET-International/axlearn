@@ -1193,6 +1193,11 @@ class SpmdTrainer(Module):
                     ),
                 )
                 if step is not None:
+                    logging.info(
+                        "[ELASTIC] SpmdTrainer state dict loaded successfully from GCS checkpoint at step %s (restore_input_iter=%s)",
+                        step,
+                        restore_input_iter,
+                    )
                     self.vlog(
                         0,
                         "Restored checkpoint at %s with restore_input_iter=%s",
@@ -1218,6 +1223,11 @@ class SpmdTrainer(Module):
                     ),
                 )
                 if step is not None:
+                    logging.info(
+                        "[ELASTIC] SpmdTrainer state dict loaded successfully from GCS checkpoint at step %s (restore_input_iter=%s, fallback)",
+                        step,
+                        restore_input_iter,
+                    )
                     self.vlog(
                         0,
                         "Restored checkpoint at %s with restore_input_iter=%s",

@@ -420,6 +420,7 @@ def sync_restore_class_vars(
                 )
                 snapshot_mgr.trainer_state_specs = fresh_trainer._trainer_state_specs
                 fresh_trainer._trainer_state = restored_trainer_state
+                logging.info("[ELASTIC] SpmdTrainer state dict loaded successfully from in-memory snapshot.")
                 t0 = time.perf_counter()
                 jax.block_until_ready(fresh_trainer._trainer_state)
                 logging.info("[ELASTIC] Hardware Placement Barrier took %.3fs", time.perf_counter() - t0)

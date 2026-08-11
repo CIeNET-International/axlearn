@@ -776,6 +776,10 @@ def get_trainer_config_fn(
         )
         cfg.checkpointer.keep_every_n_steps = min(max_step, keep_every_n_steps)
         cfg.checkpointer.keep_last_n = 3
+        
+        # Configure checkpointer limits to prevent coordinator host OOM during GCS saves
+        cfg.checkpointer.storage.max_concurrent_gb = 16
+        cfg.checkpointer.storage.max_data_shard_degree = 1
         cfg.summary_writer.write_every_n_steps = min(eval_every_n_steps, 100)
         cfg.summary_writer.max_queue = 1000
         if len(mesh_axis_names) != len(mesh_shape):
