@@ -251,7 +251,7 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
             )
     
     if elastic_snapshotting_enabled:
-        wait_for_all_devices()
+        wait_for_all_devices(timeout_seconds=1800)
 
     elastic_manager = None
     elastic_manager_initialized = False
@@ -406,6 +406,7 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
                 )
                 time.sleep(backoff_delay)
                 
+                logging.info("[ELASTIC] Number of Elastic Slices %d ", FLAGS.num_elastic_slices)
                 handle_preemption_recovery(elastic_manager, required_slices=FLAGS.num_elastic_slices)
 
                 logging.info(
