@@ -25,28 +25,8 @@ class Snapshotter:
 
   @staticmethod
   def _selective_delete_pytree(pytree: Any, active_devices: Iterable[Any]) -> tuple[int, int]:
-      """Deletes shards in pytree that reside on active_devices, skipping inactive devices."""
-      deleted_count = 0
-      ignored_count = 0
-      if active_devices is None:
-          return 0, 0
-
-      def selective_delete(x):
-          nonlocal deleted_count, ignored_count
-          if isinstance(x, jax.Array) and hasattr(x, "addressable_shards"):
-              for shard in x.addressable_shards:
-                  try:
-                      if shard.device in active_devices:
-                          shard.data.delete()
-                          deleted_count += 1
-                      else:
-                          ignored_count += 1
-                  except Exception:
-                      pass
-
-      if pytree is not None:
-          jax.tree.map(selective_delete, pytree)
-      return deleted_count, ignored_count
+      """No-op. Reference nullification and gc.collect() handle old snapshot buffer cleanup."""
+      return 0, 0
 
   def __init__(self, *, replica_axis_index: int = 0, trainer_state_specs: Optional[Nested[TensorSpec]] = None):
     self._latest_snapshot: tuple[tree_types.PyTree, int] | None = None
@@ -90,14 +70,9 @@ class Snapshotter:
             old_snapshot = self._latest_snapshot
             self._latest_snapshot = (pinned_state, step)
         
-        if old_snapshot is not None and isinstance(active_mesh, jax.sharding.Mesh):
+        if old_snapshot is not None:
           old_state, old_step = old_snapshot
-          _logger.info("[ELASTIC] Selectively deleting old snapshot (step %d) shards on active mesh...", old_step)
-          deleted_shards_count, ignored_shards_count = self._selective_delete_pytree(old_state, active_mesh.devices)
-          _logger.info("[ELASTIC] Selective snapshot deletion complete. Deleted %d shards, ignored %d shards on inactive devices.", deleted_shards_count, ignored_shards_count)
           del old_state, old_snapshot
-          import gc
-          gc.collect()
 
       except Exception as e:  # pylint: disable=broad-except
         err_msg = "Unknown error"
@@ -364,37 +339,21 @@ class Snapshotter:
     _logger.info("[ELASTIC] Extracting active replicas and addressable shards from pinned state...")
     reconstructed_state = jax.tree.map(get_active_pytree, pinned_state, abstract_state)
         
-    # Stage 1: Reshard on host to target mesh layout (keeping memory_kind as 'pinned_host')
-    t0_stage1 = time.perf_counter()
-    _logger.info("[ELASTIC] Stage 1: Resharding reconstructed state on host...")
-    host_target_shardings = jax.tree.map(
-        lambda x: x.sharding.with_memory_kind("pinned_host") if hasattr(x, "sharding") and x.sharding is not None else None, abstract_state
-    )
-    host_target_state = jax.device_put(reconstructed_state, host_target_shardings)
-    jax.block_until_ready(host_target_state)
-    stage1_time = time.perf_counter() - t0_stage1
-    _logger.info("[ELASTIC] [TIMING] Stage 1 Host Resharding took %.3f seconds", stage1_time)
-
-    # Stage 2: Move from host back to device (TPU) memory
-    t0_stage2 = time.perf_counter()
-    _logger.info("[ELASTIC] Stage 2: Moving state to TPU device memory...")
+    # Direct Single-Stage Restoration: Move directly from pinned host shards to TPU device memory
+    t0_restore = time.perf_counter()
+    _logger.info("[ELASTIC] Restoring state directly to TPU device memory...")
     device_target_shardings = jax.tree.map(
         lambda x: x.sharding.with_memory_kind("device") if hasattr(x, "sharding") and x.sharding is not None else None, abstract_state
     )
-    restored_state = jax.device_put(host_target_state, device_target_shardings)
+    restored_state = jax.device_put(reconstructed_state, device_target_shardings)
     jax.block_until_ready(restored_state)
-    stage2_time = time.perf_counter() - t0_stage2
-    _logger.info("[ELASTIC] [TIMING] Stage 2 TPU Device Loading took %.3f seconds", stage2_time)
+    restore_time = time.perf_counter() - t0_restore
+    _logger.info("[ELASTIC] [TIMING] TPU Device Loading took %.3f seconds", restore_time)
     
+    del reconstructed_state
     if reset_snapshot_state:
-        _logger.info("[ELASTIC] Resetting snapshot state. Selectively deleting old snapshot shards on active mesh...")
-        deleted_shards_count, ignored_shards_count = self._selective_delete_pytree(pinned_state, mesh.devices)
-        _logger.info("[ELASTIC] Selective snapshot deletion complete. Deleted %d shards, ignored %d shards on inactive devices.", deleted_shards_count, ignored_shards_count)
-        
         with self._lock:
-            self._latest_snapshot = (host_target_state, step)
-        import gc
-        gc.collect()
+            self._latest_snapshot = None
             
     return restored_state
 

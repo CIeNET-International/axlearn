@@ -294,42 +294,8 @@ RETRYABLE_KEYWORDS = ("data_loss", "unavailable", "unplaced", "slice down", "die
 
 
 def safe_delete_arrays(pytree: Any) -> int:
-    """Safely deletes unique, non-pinned JAX arrays in a pytree, avoiding double-frees on aliased views.
-
-    Args:
-        pytree: A PyTree or collection of JAX arrays to delete.
-
-    Returns:
-        The number of unique arrays deleted.
-    """
-    if pytree is None:
-        return 0
-
-    seen_ids = set()
-    deleted_count = 0
-
-    for leaf in jax.tree_util.tree_leaves(pytree):
-        if not isinstance(leaf, jax.Array):
-            continue
-
-        leaf_id = id(leaf)
-        if leaf_id in seen_ids:
-            continue
-        seen_ids.add(leaf_id)
-
-        # Never delete host-pinned snapshot backups
-        if hasattr(leaf.sharding, "memory_kind") and leaf.sharding.memory_kind == "pinned_host":
-            continue
-
-        try:
-            if hasattr(leaf, "is_deleted") and leaf.is_deleted():
-                continue
-            leaf.delete()
-            deleted_count += 1
-        except Exception as e:
-            logging.debug("[ELASTIC] Ignored error during safe array delete: %s", e)
-
-    return deleted_count
+    """No-op. Rely on Python reference drops and gc.collect() to reclaim memory."""
+    return 0
 
 
 # Backward-compatible alias
@@ -523,6 +489,20 @@ def sync_store_class_vars(obj: Any) -> tuple[dict, dict, dict]:
     return jax_device_state, python_vars, immutable_data
 
 
+@contextlib.contextmanager
+def spmd_trainer_scope(trainer: Any):
+    """Guarantees complete teardown and detachment of SpmdTrainer references on exit."""
+    try:
+        yield trainer
+    finally:
+        if trainer is not None:
+            trainer._compiled_train_step = None
+            trainer._jit_train_step = None
+            trainer._mesh = None
+            trainer._trainer_state = None
+            trainer._learner_state = None
+
+
 def _teardown_and_preserve_state(
     trainer: Any,
     python_vars: dict,
@@ -549,8 +529,6 @@ def _teardown_and_preserve_state(
             jax_device_state.pop(key, None)
 
         old_state = jax_device_state.pop("_trainer_state", None)
-        if old_state is not None:
-            safe_delete_arrays(old_state)
 
         trainer._compiled_train_step = None
         trainer._jit_train_step = None
@@ -559,9 +537,6 @@ def _teardown_and_preserve_state(
         trainer._learner_state = None
 
     clean_python_vars = {k: python_vars[k] for k in ("_latest_snapshot", "_step") if k in python_vars}
-    logging.info("[ELASTIC] Clearing JAX caches and garbage collecting before recovery/transition...")
-    jax.clear_caches()
-    gc.collect()
     return clean_python_vars, jax_device_state, immutable_data
 
 

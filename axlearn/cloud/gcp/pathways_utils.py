@@ -349,20 +349,20 @@ def _build_base_pathways_worker_container(
         f"--resource_manager_address={resource_manager_address}:"
         + f"{_PATHWAYS_RESOURCE_MANAGER_PORT}",
         f"--gcs_scratch_location={gcs_scratch_location}",
-        # Recycling host memory gives a slight increase in performance.
-        "--tpu_pinned_host_allocation_recycle=true",
+        # Disable recycling to allow on-demand allocation and avoid host DRAM accumulation across elastic resizes.
+        "--tpu_pinned_host_allocation_recycle=false",
     ]
     if not colocated_python_plugin.is_colocated_python_enabled:
+        premapped_buffer_size_gb = round_up_to_power_of_2(host_memory // 8)
         args.append(
             # The flag below is needed for better H2D performance.
-            # We use 1/4 of the host memory, rounding up to power of 2 as premapped buffer.
             # Note that pathways worker requires this flag to be a power of 2.
-            f"--tpu_premapped_buffer_size={round_up_to_power_of_2(host_memory // 4) * (1 << 30)}",
+            f"--tpu_premapped_buffer_size={premapped_buffer_size_gb * (1 << 30)}",
         )
     else:
         # Colocated python uses more host memory.
         # Thus we need to reduce the premapped buffer size.
-        premapped_buffer_size_gb = min(round_up_to_power_of_2(host_memory // 16), 32)
+        premapped_buffer_size_gb = round_up_to_power_of_2(host_memory // 16)
         args.extend(
             [
                 f"--tpu_premapped_buffer_size={premapped_buffer_size_gb * (1 << 30)}",

@@ -30,6 +30,7 @@ from axlearn.common.elastic_utils import (
     is_retryable_error,
     live_devices,
     set_elastic_manager,
+    spmd_trainer_scope,
     total_cluster_slices,
     wait_for_all_devices,
     wait_for_slices,
@@ -315,10 +316,11 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
             clean_trainer = None
             gc.collect()
 
-            with _slice_monitor_context(elastic_manager, original_slices):
-                logging.info("[ELASTIC] Starting trainer.run().")
-                output = trainer.run(prng_key)
-                logging.info("[ELASTIC] trainer.run() completed.")
+            with spmd_trainer_scope(trainer):
+                with _slice_monitor_context(elastic_manager, original_slices):
+                    logging.info("[ELASTIC] Starting trainer.run().")
+                    output = trainer.run(prng_key)
+                    logging.info("[ELASTIC] trainer.run() completed.")
 
             from axlearn.common.utils import ScaleUpSignal
             if isinstance(output, ScaleUpSignal):
