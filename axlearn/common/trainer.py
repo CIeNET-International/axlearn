@@ -473,7 +473,12 @@ class SpmdTrainer(Module):
             self._add_child("model", cfg.model)
             self._add_child("learner", cfg.learner)
             cfg.checkpointer.dir = cfg.checkpointer.dir or os.path.join(cfg.dir, "checkpoints")
+            t_ckpt_init = time.perf_counter()
             self._add_child("checkpointer", cfg.checkpointer)
+            logging.info(
+                "[ELASTIC] [TIMING] Checkpoint manager init took %.3f seconds",
+                time.perf_counter() - t_ckpt_init,
+            )
             if cfg.init_state_builder is not None:
                 self._add_child("init_state_builder", cfg.init_state_builder)
 
@@ -1251,8 +1256,13 @@ class SpmdTrainer(Module):
             if cfg.save_input_iterator:
                 ckpt_state["input_iter"] = self._input_iter
             try:
+                t_sync_save = time.perf_counter()
                 self.checkpointer.save(
                     step=int(self.step) if self.step is not None else 0, state=ckpt_state, evaler_summaries=evaler_summaries
+                )
+                logging.info(
+                    "[TIMING] Sync checkpoint save took %.3f seconds",
+                    time.perf_counter() - t_sync_save,
                 )
             except SystemExit as e:
                 logging.info("[ELASTIC] Intercepted SystemExit during checkpointer.save: %s", e)

@@ -98,6 +98,7 @@ class Snapshotter:
       self, step: int, state: tree_types.PyTreeOf[jax.Array]
   ) -> None:
     """Move arrays onto CPU worker devices."""
+    t0_async = time.perf_counter()
     _logger.info("[ELASTIC] Starting snapshot process for step %d", step)
     with self._lock:
       if self._queue.full() or self._worker_busy:
@@ -112,6 +113,12 @@ class Snapshotter:
     _logger.info("[ELASTIC] Snapshot state secured in host-pinned memory for step %d.", step)
     mesh = get_current_abstract_or_physical_mesh()
     self._queue.put((pinned_state, step, self._generation, mesh))
+    async_time = time.perf_counter() - t0_async
+    _logger.info(
+        "[ELASTIC] [TIMING] Async checkpoint save took %.4f seconds for step %d",
+        async_time,
+        step,
+    )
 
   def cancel_pending(self):
     """Clears any pending snapshot saves from the queue and resets the worker thread."""
@@ -336,8 +343,14 @@ class Snapshotter:
       if use_split_fallback:
         return get_active_pytree_fallback(x, spec)
 
+    t0_host = time.perf_counter()
     _logger.info("[ELASTIC] Extracting active replicas and addressable shards from pinned state...")
     reconstructed_state = jax.tree.map(get_active_pytree, pinned_state, abstract_state)
+    host_restore_time = time.perf_counter() - t0_host
+    _logger.info(
+        "[ELASTIC] [TIMING] Time to restore checkpoint to host memory took %.3f seconds",
+        host_restore_time,
+    )
         
     # Direct Single-Stage Restoration: Move directly from pinned host shards to TPU device memory
     t0_restore = time.perf_counter()
