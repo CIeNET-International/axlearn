@@ -221,7 +221,7 @@ def handle_preemption_recovery(
             active_count,
             required_slices,
         )
-        wait_for_slices(active_count, timeout_seconds=30)
+        wait_for_slices(active_count, timeout_seconds=pause_timeout_seconds)
 
     if elastic_manager:
         elastic_manager.new_slice_event.set()
