@@ -277,9 +277,15 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
                     logging.info("[ELASTIC] Elastic snapshotting disabled or not supported (no slice_index).")
                 elastic_manager_initialized = True
 
+            has_preserved_state = bool(
+                python_vars.get("_latest_snapshot") is not None
+                or immutable_data
+                or jax_device_state
+            )
+
             recovery_timer = None
-            if (elastic_manager and elastic_manager.new_slice_event.is_set()) or python_vars.get("_latest_snapshot") is not None or immutable_data or jax_device_state:
-                rec_type = "scale_up" if (elastic_manager and elastic_manager.new_slice_event.is_set()) else "scale_down"
+            if has_preserved_state:
+                rec_type = python_vars.pop("_recovery_type", "scale_down")
                 recovery_timer = ElasticRecoveryTimer(recovery_type=rec_type)
 
             with (recovery_timer.time_subtask("2_clean_trainer_instantiation") if recovery_timer else contextlib.nullcontext()):
@@ -287,9 +293,9 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
             logging.info("[ELASTIC] Instantiated clean trainer.")
 
             # Check whether recovery should be triggered.
-            if (elastic_manager and elastic_manager.new_slice_event.is_set()) or python_vars.get("_latest_snapshot") is not None or immutable_data or jax_device_state:
+            if has_preserved_state:
                 logging.info(
-                    "[ELASTIC] [RECOVERY PHASE 1] Preserved state or new_slice_event detected after preemption/rescaling. "
+                    "[ELASTIC] [RECOVERY PHASE 1] Preserved state detected after preemption/rescaling. "
                     "Initiating class variable and snapshot restoration onto clean trainer..."
                 )
                 if elastic_manager and elastic_manager.new_slice_event.is_set():
@@ -328,7 +334,7 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
                 
                 t_stabilize_start = time.perf_counter()
 
-                
+                python_vars["_recovery_type"] = "scale_up"
                 python_vars, jax_device_state, immutable_data = _teardown_and_preserve_state(
                     trainer, python_vars, jax_device_state, immutable_data
                 )
@@ -379,7 +385,7 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
                 
                 t_stabilize_start = time.perf_counter()
 
-                
+                python_vars["_recovery_type"] = "scale_down"
                 python_vars, jax_device_state, immutable_data = _teardown_and_preserve_state(
                     trainer, python_vars, jax_device_state, immutable_data
                 )

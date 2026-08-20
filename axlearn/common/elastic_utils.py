@@ -536,7 +536,7 @@ def _teardown_and_preserve_state(
         trainer._trainer_state = None
         trainer._learner_state = None
 
-    clean_python_vars = {k: python_vars[k] for k in ("_latest_snapshot", "_step") if k in python_vars}
+    clean_python_vars = {k: python_vars[k] for k in ("_latest_snapshot", "_step", "_recovery_type") if k in python_vars}
     return clean_python_vars, jax_device_state, immutable_data
 
 
