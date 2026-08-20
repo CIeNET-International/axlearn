@@ -7,6 +7,7 @@ import re
 from typing import Iterable, Iterator, NamedTuple, Optional, Protocol, Union
 
 import jax
+import numpy as np
 from absl import logging
 from jax._src.mesh import thread_resources
 from jax.sharding import PartitionSpec
@@ -188,6 +189,10 @@ class Input(Module):
             cfg.input_partitioner
         )
 
+    def unbatched_dataset(self) -> Iterable[Nested[Tensor]]:
+        """Returns the unbatched dataset stream if supported, or raises NotImplementedError."""
+        raise NotImplementedError(type(self))
+
     def dataset(self) -> Iterable[Nested[Tensor]]:
         """Returns the input dataset, which should produce per-feed logical batches.
 
@@ -223,6 +228,35 @@ class Input(Module):
             if "input_dispatcher" in self.children:
                 input_batch = self.input_dispatcher.logical_to_physical_batch(input_batch)
             yield input_batch
+
+    def dynamic_batches(
+        self,
+        example_iter: Iterator[Nested[Tensor]],
+        feed_batch_size: Optional[int] = None,
+    ) -> Iterator[Nested[Tensor]]:
+        """Yields per-feed physical input batches by dynamically grouping unbatched examples.
+
+        This allows the underlying unbatched example stream (and its shuffle buffer) to be
+        warmed once and preserved across scaling events and trainer re-instantiations, avoiding
+        shuffle buffer refill stalls on recovery.
+        """
+        if feed_batch_size is None:
+            if "input_dispatcher" in self.children:
+                feed_batch_size = self.input_dispatcher.feed_logical_batch_size
+            else:
+                feed_batch_size = getattr(self.config, "batch_size", None) or getattr(
+                    getattr(self.config, "batcher", None), "feed_batch_size", 1
+                )
+
+        while True:
+            samples = [next(example_iter) for _ in range(feed_batch_size)]
+            batch = jax.tree.map(
+                lambda *leaves: np.stack([as_numpy_array(x) for x in leaves], axis=0),
+                *samples,
+            )
+            if "input_dispatcher" in self.children:
+                batch = self.input_dispatcher.logical_to_physical_batch(batch)
+            yield batch
 
     def dispatch_global_batch(self, global_physical_batch: Nested[Tensor]) -> Nested[Tensor]:
         """Converts a global physical batch to a global logical batch.

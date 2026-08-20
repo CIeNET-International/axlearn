@@ -1284,6 +1284,14 @@ class Input(input_base.Input):
     def processor(self) -> DatasetToDatasetFn:
         return self._processor
 
+    def unbatched_dataset(self) -> tf.data.Dataset:
+        """Returns the processed, unbatched dataset holding the persistent shuffle buffer."""
+        ds = self._processor(self._source())
+        if self.config.is_training:
+            ds = ds.repeat()
+        ds = ds.prefetch(tf.data.AUTOTUNE)
+        return ds
+
     def dataset(self) -> tf.data.Dataset:
         return self._batcher(self._processor(self._source()))
 

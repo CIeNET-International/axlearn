@@ -263,9 +263,8 @@ class SpmdTrainer(Module):
         # Log the loss value every n steps. Defaults to None which is interpreted as every
         # 100 steps.
         log_every_n_steps: Optional[int] = None
-        
 
-
+    _persistent_unbatched_input_iter: Optional[Any] = None
 
     def __init__(
         self,
@@ -461,11 +460,32 @@ class SpmdTrainer(Module):
             )
             # Start from the beginning of the input dataset by default.
             t_iter_start = time.perf_counter()
-            self._input_iter = iter(self.input.dataset())
-            logging.info(
-                "[ELASTIC] [TIMING] Iterator cold instantiation took %.3f seconds",
-                time.perf_counter() - t_iter_start
-            )
+            self._unbatched_input_iter = None
+            self._input_iter = None
+            if hasattr(self.input, "unbatched_dataset"):
+                try:
+                    if SpmdTrainer._persistent_unbatched_input_iter is None:
+                        logging.info("[ELASTIC] Instantiating persistent unbatched dataset iterator...")
+                        SpmdTrainer._persistent_unbatched_input_iter = iter(self.input.unbatched_dataset())
+                        logging.info(
+                            "[ELASTIC] [TIMING] Initial unbatched dataset iterator creation took %.3f seconds",
+                            time.perf_counter() - t_iter_start,
+                        )
+                    else:
+                        logging.info("[ELASTIC] Reusing persistent unbatched dataset iterator (0s delay).")
+                    self._unbatched_input_iter = SpmdTrainer._persistent_unbatched_input_iter
+                except NotImplementedError:
+                    self._input_iter = iter(self.input.dataset())
+                    logging.info(
+                        "[ELASTIC] [TIMING] Iterator cold instantiation took %.3f seconds",
+                        time.perf_counter() - t_iter_start,
+                    )
+            else:
+                self._input_iter = iter(self.input.dataset())
+                logging.info(
+                    "[ELASTIC] [TIMING] Iterator cold instantiation took %.3f seconds",
+                    time.perf_counter() - t_iter_start,
+                )
             cfg.summary_writer.dir = cfg.summary_writer.dir or os.path.join(
                 cfg.dir, "summaries", "train_train"
             )
@@ -808,7 +828,20 @@ class SpmdTrainer(Module):
                 output = None
                 stop_trace_step = None
 
-                input_iterator = self.input.batches(self._input_iter)
+                if self._unbatched_input_iter is not None and hasattr(self.input, "dynamic_batches"):
+                    feed_batch_size = (
+                        self.input.input_dispatcher.feed_logical_batch_size
+                        if "input_dispatcher" in self.input.children
+                        else getattr(self.config.input, "batch_size", None) or getattr(
+                            getattr(self.config.input, "batcher", None), "feed_batch_size", 1
+                        )
+                    )
+                    input_iterator = self.input.dynamic_batches(
+                        self._unbatched_input_iter,
+                        feed_batch_size=feed_batch_size,
+                    )
+                else:
+                    input_iterator = self.input.batches(self._input_iter)
                 while True:
                         self._maybe_record_event(measurement.Event.START_DATA_LOADING)
                         

@@ -434,6 +434,11 @@ def sync_restore_class_vars(
     fresh_trainer._python_vars = python_vars
     fresh_trainer._immutable_data = immutable_data
 
+    if "_unbatched_input_iter" in python_vars:
+        fresh_trainer._unbatched_input_iter = python_vars["_unbatched_input_iter"]
+        from axlearn.common.trainer import SpmdTrainer
+        SpmdTrainer._persistent_unbatched_input_iter = python_vars["_unbatched_input_iter"]
+
     fresh_trainer._trainer_state, fresh_prng_key = _inject_fresh_prng_key(
         fresh_trainer._trainer_state, mesh, fresh_trainer.step
     )
@@ -536,7 +541,7 @@ def _teardown_and_preserve_state(
         trainer._trainer_state = None
         trainer._learner_state = None
 
-    clean_python_vars = {k: python_vars[k] for k in ("_latest_snapshot", "_step", "_recovery_type") if k in python_vars}
+    clean_python_vars = {k: python_vars[k] for k in ("_latest_snapshot", "_step", "_recovery_type", "_unbatched_input_iter") if k in python_vars}
     return clean_python_vars, jax_device_state, immutable_data
 
 
