@@ -254,10 +254,19 @@ class Snapshotter:
 
       num_healthy = len(healthy_shards)
       device_shards = []
+      dev_shard_cache = {}
       for i, dev in enumerate(target_sharding.addressable_devices):
-        src_shard_data = healthy_shards[i % num_healthy]
+        shard_idx = i % num_healthy
         single_sharding = jax.sharding.SingleDeviceSharding(dev).with_memory_kind("device")
-        dev_shard = jax.device_put(src_shard_data, single_sharding)
+        
+        if shard_idx not in dev_shard_cache:
+          src_shard_data = healthy_shards[shard_idx]
+          dev_shard = jax.device_put(src_shard_data, single_sharding)
+          dev_shard_cache[shard_idx] = dev_shard
+        else:
+          # Prevents Pathways from cloning the host-pinned buffer across slices over DCN
+          dev_shard = jax.device_put(dev_shard_cache[shard_idx], single_sharding)
+          
         device_shards.append(dev_shard)
 
       return jax.make_array_from_single_device_arrays(spec.shape, target_sharding, device_shards)
