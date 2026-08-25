@@ -167,13 +167,13 @@ class Snapshotter:
     )
 
     _logger.info(
-        "[ELASTIC][SCALE] sample_arr: shape=%s, sharding=%s", 
-        getattr(sample_arr, "shape", None), 
+        "[ELASTIC][SCALE] sample_arr: shape=%s, sharding=%s",
+        getattr(sample_arr, "shape", None),
         getattr(sample_arr, "sharding", None)
     )
     _logger.info(
-        "[ELASTIC][SCALE] sample_spec: shape=%s, sharding=%s", 
-        getattr(sample_spec, "shape", None), 
+        "[ELASTIC][SCALE] sample_spec: shape=%s, sharding=%s",
+        getattr(sample_spec, "shape", None),
         getattr(sample_spec, "sharding", None)
     )
 
@@ -185,7 +185,15 @@ class Snapshotter:
     mesh_axis_name = source_mesh.axis_names[self.replica_axis_index]
     source_replicas = source_mesh.shape.get(mesh_axis_name, 1)
     target_replicas = target_mesh.shape.get(mesh_axis_name, 1)
+
+    _logger.info("[ELASTIC][SCALE] self.replica_axis_index: %d",self.replica_axis_index)
+    _logger.info(
+        "[ELASTIC][SCALE] _is_scale_down decision: target_total (%d) < source_total (%d)",
+        source_replicas,
+        target_replicas,
+    )
     return target_replicas < source_replicas
+
 
   def _restore_scale_down(
       self,
