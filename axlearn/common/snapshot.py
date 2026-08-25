@@ -71,7 +71,7 @@ class Snapshotter:
           if task_generation == self._generation:
             old_snapshot = self._latest_snapshot
             self._latest_snapshot = (pinned_state, step)
-        
+
         if old_snapshot is not None:
           old_state, old_step = old_snapshot
           del old_state, old_snapshot
@@ -137,16 +137,16 @@ class Snapshotter:
             task = self._queue.get_nowait()
             if task is not None:
                 pinned_state = task[0]
-                
+
                 deleted_shards_count, ignored_shards_count = self._selective_delete_pytree(pinned_state, active_devices)
                 _logger.info("[ELASTIC] Cancelled pending snapshot. Deleted %d shards, ignored %d shards on inactive devices.", deleted_shards_count, ignored_shards_count)
             self._queue.task_done()
         except queue.Empty:
             break
-            
+
     self._queue.put(None)
     self._worker_thread.join()
-    
+
     self._worker_thread = threading.Thread(target=self._worker, daemon=True)
     self._worker_thread.start()
 
@@ -156,6 +156,7 @@ class Snapshotter:
       abstract_state: tree_types.PyTree,
   ) -> bool:
     """Returns True if the target mesh has fewer replica slices than the snapshot mesh."""
+    _logger.info("[ELASTIC][SCALE] Executing _is_scale_down ...")
     sample_arr = next(
         (x for x in jax.tree_util.tree_leaves(pinned_state) if isinstance(x, jax.Array) and hasattr(getattr(x, "sharding", None), "mesh")),
         None,
@@ -164,6 +165,18 @@ class Snapshotter:
         (s for s in jax.tree_util.tree_leaves(abstract_state) if hasattr(getattr(s, "sharding", None), "mesh")),
         None,
     )
+
+    _logger.info(
+        "[ELASTIC][SCALE] sample_arr: shape=%s, sharding=%s", 
+        getattr(sample_arr, "shape", None), 
+        getattr(sample_arr, "sharding", None)
+    )
+    _logger.info(
+        "[ELASTIC][SCALE] sample_spec: shape=%s, sharding=%s", 
+        getattr(sample_spec, "shape", None), 
+        getattr(sample_spec, "sharding", None)
+    )
+
     if sample_arr is None or sample_spec is None:
       return False
 
@@ -258,7 +271,7 @@ class Snapshotter:
       for i, dev in enumerate(target_sharding.addressable_devices):
         shard_idx = i % num_healthy
         single_sharding = jax.sharding.SingleDeviceSharding(dev).with_memory_kind("device")
-        
+
         if shard_idx not in dev_shard_cache:
           src_shard_data = healthy_shards[shard_idx]
           dev_shard = jax.device_put(src_shard_data, single_sharding)
@@ -266,7 +279,7 @@ class Snapshotter:
         else:
           # Prevents Pathways from cloning the host-pinned buffer across slices over DCN
           dev_shard = jax.device_put(dev_shard_cache[shard_idx], single_sharding)
-          
+
         device_shards.append(dev_shard)
 
       return jax.make_array_from_single_device_arrays(spec.shape, target_sharding, device_shards)
