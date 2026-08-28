@@ -1130,6 +1130,7 @@ def get_trainer_kwargs(
             ),
         )
     elif model_size == "405B":
+        import jax
         trainer_kwargs = dict(
             model_kwargs=dict(
                 num_layers=126,
@@ -1144,7 +1145,7 @@ def get_trainer_kwargs(
             ),
             learner_kwargs=dict(peak_lr=1.5e-4, weight_decay=0.1),
             max_sequence_length=max_sequence_length,
-            train_batch_size=train_batch_size,
+            train_batch_size=len(jax.devices()),#train_batch_size,
             max_step=max_step,
             mesh_shape=mesh_shape_from_axes(fsdp=-1),
             mesh_rules=(
@@ -1212,12 +1213,42 @@ def get_trainer_kwargs(
                         ],
                     ),
                 ),
-                (
-                    "tpu-v6e-256",
+                # (
+                #     "tpu-v6e-256",
+                #     ChainConfigModifier.default_config().set(
+                #         config_modifiers=[
+                #             MeshShapeModifier.default_config().set(
+                #                 mesh_shape=mesh_shape_from_axes(data=-1, fsdp=256)
+                #             ),
+                #             RematSpecModifier.default_config().set(
+                #                 remat_policies={
+                #                     "model.decoder.transformer.layer": RematSpec(
+                #                         prevent_cse=False,
+                #                         policy=config_for_function(
+                #                             save_and_offload_only_these_names_regex
+                #                         ).set(
+                #                             names_which_can_be_saved=None,
+                #                             names_which_can_be_offloaded=(
+                #                                 RematRegexSavePatterns.INPUT.value
+                #                             ),
+                #                             offload_src="device",
+                #                             offload_dst="pinned_host",
+                #                         ),
+                #                     ),
+                #                 }
+                #             ),
+                #         ],
+                #     ),
+                # ),
+                  (
+                    "tpu-v6e-256-.*",
                     ChainConfigModifier.default_config().set(
                         config_modifiers=[
                             MeshShapeModifier.default_config().set(
-                                mesh_shape=mesh_shape_from_axes(data=-1, fsdp=256)
+                                mesh_shape=HybridMeshShape(
+                                    ici_mesh_shape=mesh_shape_from_axes(fsdp=256),
+                                    dcn_mesh_shape=mesh_shape_from_axes(pipeline=1, data=2),
+                                )
                             ),
                             RematSpecModifier.default_config().set(
                                 remat_policies={
