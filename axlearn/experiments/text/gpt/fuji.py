@@ -1154,7 +1154,10 @@ def get_trainer_kwargs(
                     ChainConfigModifier.default_config().set(
                         config_modifiers=[
                             MeshShapeModifier.default_config().set(
-                                mesh_shape=mesh_shape_from_axes(fsdp=-1)
+                                mesh_shape=HybridMeshShape(
+                                    ici_mesh_shape=mesh_shape_from_axes(fsdp=256),
+                                    dcn_mesh_shape=mesh_shape_from_axes(pipeline=1, data=2),
+                                )
                             ),
                             RematSpecModifier.default_config().set(
                                 remat_policies={
@@ -1163,7 +1166,9 @@ def get_trainer_kwargs(
                                         policy=config_for_function(
                                             save_and_offload_only_these_names_regex
                                         ).set(
-                                            names_which_can_be_saved=None,
+                                            names_which_can_be_saved=(
+                                                RematRegexSavePatterns.QKV_PROJ.value
+                                            ),
                                             names_which_can_be_offloaded=(
                                                 RematRegexSavePatterns.INPUT.value
                                             ),
@@ -1247,25 +1252,34 @@ def get_trainer_kwargs(
                             MeshShapeModifier.default_config().set(
                                 mesh_shape=HybridMeshShape(
                                     ici_mesh_shape=mesh_shape_from_axes(fsdp=256),
-                                    dcn_mesh_shape=mesh_shape_from_axes(pipeline=1, data=2),
+                                    dcn_mesh_shape=mesh_shape_from_axes(fsdp=2),
                                 )
                             ),
                             RematSpecModifier.default_config().set(
                                 remat_policies={
                                     "model.decoder.transformer.layer": RematSpec(
-                                        prevent_cse=False,
+                                        prevent_cse=True,
                                         policy=config_for_function(
                                             save_and_offload_only_these_names_regex
                                         ).set(
                                             names_which_can_be_saved=None,
-                                            names_which_can_be_offloaded=(
-                                                RematRegexSavePatterns.INPUT.value
+                                            names_which_can_be_offloaded="|".join(
+                                                [
+                                                    RematRegexSavePatterns.QKV_PROJ.value,
+                                                    RematRegexSavePatterns.INPUT.value,
+                                                ]
                                             ),
                                             offload_src="device",
                                             offload_dst="pinned_host",
                                         ),
                                     ),
                                 }
+                            ),
+                            V6eFlashConfigModifier.default_config(),
+                            SplashAttentionConfigModifier.default_config().set(
+                                splash_block_q=1024,
+                                splash_block_q_dkv=2048,
+                                splash_block_q_dq=2048,
                             ),
                         ],
                     ),
