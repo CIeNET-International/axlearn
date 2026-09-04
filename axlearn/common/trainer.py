@@ -887,8 +887,8 @@ class SpmdTrainer(Module):
                                     self._step_log("[ELASTIC] Scale-up event detected! Cleanly exiting run loop for scale-up expansion...")
                                     return ScaleUpSignal()
 
-                                if self.step % 5 == 0:
-                                    self._jax_device_state, self._python_vars, self._immutable_data = sync_store_class_vars(self)
+                                # if self.step % 5 == 0:
+                                #     self._jax_device_state, self._python_vars, self._immutable_data = sync_store_class_vars(self)
 
                                 num_steps += 1
                                 if num_steps % 100 == 0:
