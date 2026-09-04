@@ -141,7 +141,7 @@ flags.DEFINE_string(
 )
 flags.DEFINE_integer(
     "num_elastic_slices",
-    2,
+    1,
     "Minimum number of active slices required to continue training without pausing.",
 )
 
@@ -406,7 +406,6 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
                 )
                 time.sleep(backoff_delay)
 
-                logging.info("[ELASTIC] Number of Elastic Slices %d ", FLAGS.num_elastic_slices)
                 handle_preemption_recovery(elastic_manager, required_slices=FLAGS.num_elastic_slices)
 
                 logging.info(
