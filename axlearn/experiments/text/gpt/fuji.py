@@ -1155,7 +1155,7 @@ def get_trainer_kwargs(
                         config_modifiers=[
                             MeshShapeModifier.default_config().set(
                                 mesh_shape=HybridMeshShape(
-                                    ici_mesh_shape=mesh_shape_from_axes(fsdp=512),
+                                    ici_mesh_shape=mesh_shape_from_axes(fsdp=1024),
                                     dcn_mesh_shape=mesh_shape_from_axes(pipeline=1, data=2),
                                 )
                             ),
