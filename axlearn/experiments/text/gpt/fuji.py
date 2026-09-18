@@ -786,11 +786,14 @@ def get_trainer_kwargs(
                     ),
                 ),
                 (
-                    "tpu-v5p-.*",
+                    "tpu-v5p-256",
                     ChainConfigModifier.default_config().set(
                         config_modifiers=[
                             MeshShapeModifier.default_config().set(
-                                mesh_shape=mesh_shape_from_axes(fsdp=-1)
+                                mesh_shape=HybridMeshShape(
+                                    ici_mesh_shape=mesh_shape_from_axes(fsdp=256),
+                                    dcn_mesh_shape=mesh_shape_from_axes(pipeline=1, data=2),
+                                )
                             ),
                             RematSpecModifier.default_config().set(
                                 remat_policies={
