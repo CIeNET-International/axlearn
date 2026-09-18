@@ -786,12 +786,12 @@ def get_trainer_kwargs(
                     ),
                 ),
                 (
-                    "tpu-v5p-256",
+                    "tpu-v5p-128",
                     ChainConfigModifier.default_config().set(
                         config_modifiers=[
                             MeshShapeModifier.default_config().set(
                                 mesh_shape=HybridMeshShape(
-                                    ici_mesh_shape=mesh_shape_from_axes(fsdp=256),
+                                    ici_mesh_shape=mesh_shape_from_axes(fsdp=128),
                                     dcn_mesh_shape=mesh_shape_from_axes(pipeline=1, data=2),
                                 )
                             ),
