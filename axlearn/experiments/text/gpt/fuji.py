@@ -607,6 +607,28 @@ def get_trainer_kwargs(
                     ),
                 ),
                 (
+                    "tpu-v5p-16",
+                    ChainConfigModifier.default_config().set(
+                        config_modifiers=[
+                            MeshShapeModifier.default_config().set(
+                                # fsdp=8 is also ok, only 2% slower step time.
+                                mesh_shape=mesh_shape_from_axes(data=-1, fsdp=8)
+                            ),
+                            RematSpecModifier.default_config().set(
+                                remat_policies={
+                                    "model.decoder.transformer.layer": RematSpec(
+                                        prevent_cse=False,
+                                        policy=config_for_function(combine_remat_policies).set(
+                                            policy_1=save_or_offload_flash_attention_policy(),
+                                            policy_2=jax_remat_policies.dots_saveable,
+                                        ),
+                                    ),
+                                }
+                            ),
+                        ],
+                    ),
+                ),
+                (
                     "tpu-v5p-.*",
                     ChainConfigModifier.default_config().set(
                         config_modifiers=[
