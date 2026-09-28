@@ -149,7 +149,7 @@ flags.DEFINE_integer(
 
 FLAGS = flags.FLAGS
 
-elastic_snapshotting_enabled = False
+elastic_snapshotting_enabled = True
 
 
 def get_trainer_config(
