@@ -146,6 +146,23 @@ flags.DEFINE_integer(
     1,
     "Minimum number of active slices required to continue training without pausing.",
 )
+flags.DEFINE_integer(
+    "elastic_pause_timeout_seconds",
+    elastic_utils.DEFAULT_PAUSE_RESUME_TIMEOUT_SECONDS,
+    "Maximum time in seconds to pause in-memory waiting for preempted slices to return before "
+    "falling back to degraded slice training (if >= num_elastic_slices) or persistent checkpoint.",
+)
+flags.DEFINE_integer(
+    "elastic_snapshot_every_n_steps",
+    None,
+    "Frequency (in steps) for saving in-memory host snapshots for elastic recovery. "
+    "If None, uses SpmdTrainer.Config.elastic_snapshot_every_n_steps (default 5).",
+)
+flags.DEFINE_integer(
+    "save_every_n_steps",
+    None,
+    "If set, overrides the checkpointer save_policy.min_step and keep_every_n_steps period.",
+)
 
 FLAGS = flags.FLAGS
 
@@ -205,6 +222,19 @@ def get_trainer_config(
         )
     if trainer_config.log_every_n_steps is None:
         trainer_config.log_every_n_steps = flag_values.trainer_log_every_n_steps
+    if flag_values.elastic_snapshot_every_n_steps is not None:
+        trainer_config.elastic_snapshot_every_n_steps = int(
+            flag_values.elastic_snapshot_every_n_steps
+        )
+    if flag_values.save_every_n_steps is not None:
+        save_every = int(flag_values.save_every_n_steps)
+        if hasattr(trainer_config.checkpointer, "save_policy"):
+            if hasattr(trainer_config.checkpointer.save_policy, "n"):
+                trainer_config.checkpointer.save_policy.n = save_every
+            if hasattr(trainer_config.checkpointer.save_policy, "min_step"):
+                trainer_config.checkpointer.save_policy.min_step = save_every
+        if hasattr(trainer_config.checkpointer, "keep_every_n_steps"):
+            trainer_config.checkpointer.keep_every_n_steps = save_every
     for eval_cfg in trainer_config.evalers.values():
         eval_cfg.trace_at_iters = [int(el) for el in flag_values.eval_trace_at_iters]
     if flag_values.device_monitor == "tpu":
@@ -431,7 +461,6 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
                         
                         continue
                     _job_completed_gracefully = True
-                    measurement.record_event(measurement.Event.END_JOB)
                     break
                     
                 except Exception as e:
@@ -443,12 +472,13 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
                     if "python_vars" not in locals():
                         python_vars = {}
                     if is_retryable_error(e):
+                        t_preempt_detected = time.perf_counter()
                         record_elastic_event_start("elastic_slice_down")
                         logging.warning(
                             "[ELASTIC] Caught retryable error: %s. Initiating in-memory state preservation and TPU cleanup...", e
                         )
                         
-                        t_stabilize_start = time.perf_counter()
+                        t_stabilize_start = t_preempt_detected
 
                         python_vars["_recovery_type"] = "scale_down"
                         python_vars, jax_device_state, immutable_data = _teardown_and_preserve_state(
@@ -456,6 +486,7 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
                         )
                         trainer = None
                         clean_trainer = None
+                        elastic_manager_initialized = False
 
                         current_step = int(python_vars.get("_step", -1))
                         if current_step > last_successful_step:
@@ -471,7 +502,13 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
                         )
                         time.sleep(backoff_delay)
                         
-                        handle_preemption_recovery(elastic_manager, required_slices=FLAGS.num_elastic_slices)
+                        handle_preemption_recovery(
+                            elastic_manager,
+                            required_slices=FLAGS.num_elastic_slices,
+                            desired_slices=original_slices,
+                            pause_timeout_seconds=FLAGS.elastic_pause_timeout_seconds,
+                            detected_at=t_preempt_detected,
+                        )
                         elastic_utils.record_elastic_wait_end_and_reinit_start()
 
                         logging.info(

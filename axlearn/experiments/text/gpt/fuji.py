@@ -118,6 +118,7 @@ TOTAL_TOKENS = {
         "test": 2 * (1024**4),  # 2T tokens
         "7B": 2 * (1024**4),  # 2T tokens
         "70B": 2 * (1024**4),  # 2T tokens
+        "405B": 2 * (1024**4),  # 2T tokens
     },
     Version.V3: {
         "test": 15 * (1024**4),  # 15T tokens
@@ -1147,6 +1148,7 @@ def get_trainer_kwargs(
             max_sequence_length=max_sequence_length,
             train_batch_size=len(jax.devices()),#train_batch_size,
             max_step=max_step,
+            save_every_n_steps=100,
             mesh_shape=mesh_shape_from_axes(fsdp=-1),
             mesh_rules=(
                 (
@@ -1182,11 +1184,14 @@ def get_trainer_kwargs(
                     ),
                 ),
                 (
-                    "tpu-7x-.*",
+                    "tpu-v?7x-.*",
                     ChainConfigModifier.default_config().set(
                         config_modifiers=[
                             MeshShapeModifier.default_config().set(
-                                mesh_shape=mesh_shape_from_axes(data=-1, fsdp=256)
+                                mesh_shape=HybridMeshShape(
+                                    ici_mesh_shape=mesh_shape_from_axes(fsdp=1024),
+                                    dcn_mesh_shape=mesh_shape_from_axes(pipeline=1, data=2),
+                                )
                             ),
                             # Use the updated block size for Splash Attention
                             V7xFlashConfigModifier.default_config(),

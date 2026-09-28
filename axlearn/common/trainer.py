@@ -265,6 +265,9 @@ class SpmdTrainer(Module):
         # 100 steps.
         log_every_n_steps: Optional[int] = None
 
+        # Frequency (in steps) for saving in-memory host snapshots for elastic recovery.
+        elastic_snapshot_every_n_steps: int = 5
+
     _persistent_unbatched_input_iter: Optional[Any] = None
 
     def __init__(
@@ -332,12 +335,18 @@ class SpmdTrainer(Module):
         device_attr = "process_index" if device_platform != "tpu" else "slice_index"
         num_granules = max(1, len(set(getattr(el, device_attr) for el in live_devs)))
         num_devices_per_granule = max(1, len(live_devs) // num_granules)
+        data_axis_idx = cfg.mesh_axis_names.index("data") if "data" in cfg.mesh_axis_names else 0
+        fsdp_axis_idx = cfg.mesh_axis_names.index("fsdp") if "fsdp" in cfg.mesh_axis_names else -1
 
         # Extract original_granules from cfg.mesh_shape before it is updated.
         if isinstance(cfg.mesh_shape, HybridMeshShape):
             original_granules = math.prod(cfg.mesh_shape.dcn_mesh_shape)
         elif isinstance(cfg.mesh_shape, Sequence) and not isinstance(cfg.mesh_shape, str):
-            original_granules = cfg.mesh_shape[0] if len(cfg.mesh_shape) > 0 else 1
+            original_granules = (
+                cfg.mesh_shape[data_axis_idx]
+                if len(cfg.mesh_shape) > data_axis_idx and cfg.mesh_shape[data_axis_idx] > 1
+                else max(1, len(live_devs) // num_devices_per_granule)
+            )
         else:
             original_granules = 1
             
@@ -346,26 +355,27 @@ class SpmdTrainer(Module):
         if isinstance(cfg.mesh_shape, Sequence) and not isinstance(cfg.mesh_shape, str):
             original_mesh_shape = list(cfg.mesh_shape)
             if len(original_mesh_shape) > 0:
-                original_mesh_shape[0] = num_granules
+                original_mesh_shape[data_axis_idx] = num_granules
 
-                ici_shape = original_mesh_shape[1:]
-                current_ici_prod = math.prod(ici_shape)
+                ici_axes = [
+                    i for i in range(len(original_mesh_shape)) if i != data_axis_idx
+                ]
+                current_ici_prod = math.prod(original_mesh_shape[i] for i in ici_axes)
                 if current_ici_prod != num_devices_per_granule:
                     logging.info("[!] ICI product %d does not match num_devices_per_granule %d. Adjusting...", current_ici_prod, num_devices_per_granule)
                     ratio = current_ici_prod // num_devices_per_granule
+                    adjusted = False
                     if ratio > 0 and current_ici_prod % num_devices_per_granule == 0:
-                        for i in range(len(ici_shape)):
-                            if ici_shape[i] % ratio == 0 and ici_shape[i] > 1:
-                                ici_shape[i] = ici_shape[i] // ratio
+                        for i in ([fsdp_axis_idx] if fsdp_axis_idx >= 0 else []) + ici_axes:
+                            if i != data_axis_idx and original_mesh_shape[i] % ratio == 0 and original_mesh_shape[i] > 1:
+                                original_mesh_shape[i] = original_mesh_shape[i] // ratio
+                                adjusted = True
                                 break
-                    else:
-                        ici_shape = [1] * len(ici_shape)
-                        if len(ici_shape) >= 3:
-                            ici_shape[-3] = num_devices_per_granule
-                        else:
-                            ici_shape[-1] = num_devices_per_granule
-
-                original_mesh_shape[1:] = ici_shape
+                    if not adjusted:
+                        for i in ici_axes:
+                            original_mesh_shape[i] = 1
+                        target_idx = fsdp_axis_idx if fsdp_axis_idx >= 0 else ici_axes[-1]
+                        original_mesh_shape[target_idx] = num_devices_per_granule
 
             cfg.mesh_shape = tuple(original_mesh_shape)
             logging.info("[!] Dynamically updating logical mesh_shape to %s", cfg.mesh_shape)
@@ -383,13 +393,13 @@ class SpmdTrainer(Module):
                             break
                 else:
                     dcn_shape = [1] * len(dcn_shape)
-                    dcn_shape[0] = num_granules
+                    dcn_shape[data_axis_idx] = num_granules
             
             current_ici_prod = math.prod(ici_shape)
             if current_ici_prod != num_devices_per_granule:
                 ratio = current_ici_prod // num_devices_per_granule
                 if ratio > 0 and current_ici_prod % num_devices_per_granule == 0:
-                    for i in range(len(ici_shape)):
+                    for i in ([fsdp_axis_idx] if fsdp_axis_idx >= 0 else []) + list(range(len(ici_shape))):
                         if ici_shape[i] % ratio == 0 and ici_shape[i] > 1:
                             ici_shape[i] = ici_shape[i] // ratio
                             break
@@ -411,11 +421,13 @@ class SpmdTrainer(Module):
                 num_granules,
             )
             
+            scaled_any = False
             # 3. Simple gradient accumulation
             if hasattr(cfg.learner, "gradient_accumulation_steps") and getattr(cfg.learner, "gradient_accumulation_steps", None) is not None:
                 old_gas = cfg.learner.gradient_accumulation_steps
                 scaled_gas = (old_gas * original_granules + num_granules - 1) // num_granules
                 cfg.learner.gradient_accumulation_steps = max(1, scaled_gas)
+                scaled_any = True
                 logging.info("[ELASTIC] Scaled simple gradient_accumulation_steps from %s to %s", old_gas, cfg.learner.gradient_accumulation_steps)
             
             # 4. Production gradient accumulation
@@ -425,7 +437,25 @@ class SpmdTrainer(Module):
                     old_steps = fft.steps
                     scaled_steps = (old_steps * original_granules + num_granules - 1) // num_granules
                     fft.steps = max(1, scaled_steps)
+                    scaled_any = True
                     logging.info("[ELASTIC] Scaled production forward_fn_transformation steps from %s to %s", old_steps, fft.steps)
+
+            if not scaled_any and hasattr(cfg.learner, "forward_fn_transformation"):
+                from axlearn.common import config as ax_config
+                from axlearn.common import gradient_accumulation
+                fallback_steps = max(1, (original_granules + num_granules - 1) // num_granules)
+                cfg.learner.forward_fn_transformation = ax_config.config_for_function(
+                    gradient_accumulation.with_minibatch_steps
+                ).set(
+                    steps=fallback_steps,
+                    metric_accumulator=gradient_accumulation.MetricAccumulator.default_config(),
+                )
+                logging.info(
+                    "[ELASTIC] Injected forward_fn_transformation with_minibatch_steps=%d for degraded mesh (%d -> %d slices).",
+                    fallback_steps,
+                    original_granules,
+                    num_granules,
+                )
 
         self._step_log("Mesh shape: %s", cfg.mesh_shape)
         devices = (
@@ -813,7 +843,8 @@ class SpmdTrainer(Module):
 
             with self.checkpointer:
                 logging.info("[ELASTIC] Starting loop...")
-                
+                elastic_utils.record_slice_state()
+
                 if hasattr(self, "_elastic_reinit_start_time"):
                     # self._maybe_record_event(
                     #     measurement.Event.END_CUSTOM_BADPUT_EVENT,
@@ -887,10 +918,12 @@ class SpmdTrainer(Module):
                                 from axlearn.common.utils import get_elastic_manager, ScaleUpSignal
                                 em = get_elastic_manager()
                                 if em and em.new_slice_event.is_set():
-                                    self._step_log("[ELASTIC] Scale-up event detected! Cleanly exiting run loop for scale-up expansion...")
+                                    self._step_log("[ELASTIC] Scale-up event detected! Capturing pre-scale-up snapshot and cleanly exiting run loop for scale-up expansion...")
+                                    self._jax_device_state, self._python_vars, self._immutable_data = sync_store_class_vars(self)
                                     return ScaleUpSignal()
 
-                                if self.step % 5 == 0:
+                                snapshot_interval = getattr(cfg, "elastic_snapshot_every_n_steps", 5)
+                                if snapshot_interval and snapshot_interval > 0 and self.step % snapshot_interval == 0:
                                     self._jax_device_state, self._python_vars, self._immutable_data = sync_store_class_vars(self)
         
                                 num_steps += 1
@@ -1221,8 +1254,14 @@ class SpmdTrainer(Module):
             for path, spec in utils.flatten_items(self._trainer_state_specs):
                 self.vlog(1, "restore spec: %s=%s", path, spec)
             ckpt_state_spec = self._trainer_state_specs._asdict()
+            iter_spec = (
+                iter(self.input.unbatched_dataset())
+                if self._unbatched_input_iter is not None
+                and hasattr(self.input, "unbatched_dataset")
+                else iter(self.input.dataset())
+            )
             ckpt_state_spec_with_input_iter = dict(
-                **ckpt_state_spec, input_iter=iter(self.input.dataset())
+                **ckpt_state_spec, input_iter=iter_spec
             )
             restore_input_iter = cfg.save_input_iterator
             try:
@@ -1281,7 +1320,10 @@ class SpmdTrainer(Module):
                     **{k: v for k, v in ckpt_state.items() if k in TrainerState._fields}
                 )
                 if cfg.save_input_iterator and "input_iter" in ckpt_state:
-                    self._input_iter = ckpt_state["input_iter"]
+                    if self._unbatched_input_iter is not None:
+                        self._unbatched_input_iter = ckpt_state["input_iter"]
+                    else:
+                        self._input_iter = ckpt_state["input_iter"]
             return step
 
     def save_checkpoint(self, evaler_summaries: Optional[dict[str, Any]]) -> Optional[int]:
@@ -1290,7 +1332,11 @@ class SpmdTrainer(Module):
         with self.mesh():
             ckpt_state = self._trainer_state._asdict()
             if cfg.save_input_iterator:
-                ckpt_state["input_iter"] = self._input_iter
+                ckpt_state["input_iter"] = (
+                    self._unbatched_input_iter
+                    if self._unbatched_input_iter is not None
+                    else self._input_iter
+                )
             try:
                 t_sync_save = time.perf_counter()
                 self.checkpointer.save(

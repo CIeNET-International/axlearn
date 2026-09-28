@@ -35,7 +35,17 @@ except (ImportError, ModuleNotFoundError):
     manager = None
 
 _elastic_manager: Optional[Any] = None
-RETRYABLE_KEYWORDS = ("data_loss", "unavailable", "unplaced", "slice down", "died", "resource_exhausted")
+RETRYABLE_KEYWORDS = (
+    "data_loss",
+    "unavailable",
+    "unplaced",
+    "slice down",
+    "died",
+    "resource_exhausted",
+    "_cp_wrapper_pop_result",
+    "singleton_result_store",
+)
+DEFAULT_PAUSE_RESUME_TIMEOUT_SECONDS = 300
 _max_slices: int = 0
 _in_elastic_reinit: bool = False
 _active_elastic_event_type: str = "elastic_wait"
@@ -50,15 +60,10 @@ def get_slice_counts() -> tuple[int, int]:
 
 
 def record_slice_state(active_slices_override: Optional[int] = None) -> None:
-
-    
     active_slices, max_slices = get_slice_counts()
-    # if active_slices_override is not None:
-    #     active_slices = active_slices_override
+    if active_slices_override is not None:
+        active_slices = active_slices_override
 
-    #### TODO #######
-    #available_slices = len(pathwaysutils.elastic.get_active_slice_indices())
-    ###### TODO ######
     if max_slices > 0:
         measurement.record_event(
             measurement.Event.RECORD_SLICE_COUNTS,
@@ -77,12 +82,13 @@ def record_elastic_event_start(event_type: str) -> None:
 
 def record_elastic_wait_end_and_reinit_start() -> None:
     global _in_elastic_reinit
-    measurement.record_event(
-        measurement.Event.END_ELASTIC_WAIT, event_type=_active_elastic_event_type
-    )
-    measurement.record_event(measurement.Event.START_ELASTIC_REINIT)
-    _in_elastic_reinit = True
-    record_slice_state()
+    if not _in_elastic_reinit:
+        measurement.record_event(
+            measurement.Event.END_ELASTIC_WAIT, event_type=_active_elastic_event_type
+        )
+        measurement.record_event(measurement.Event.START_ELASTIC_REINIT)
+        _in_elastic_reinit = True
+        record_slice_state()
 
 
 def record_elastic_reinit_end() -> None:
@@ -142,10 +148,17 @@ def is_error_due_to_slice_down(e: Exception) -> bool:
 
 def is_retryable_error(e: Exception) -> bool:
     """Returns True if the exception e is considered a retryable elastic error."""
-    if is_error_due_to_slice_down(e):
-        return True
-    err_str = str(e).lower()
-    return any(keyword in err_str for keyword in RETRYABLE_KEYWORDS)
+    cur: Optional[BaseException] = e
+    visited: set[int] = set()
+    while cur is not None and id(cur) not in visited:
+        visited.add(id(cur))
+        if isinstance(cur, Exception) and is_error_due_to_slice_down(cur):
+            return True
+        err_str = str(cur).lower()
+        if any(keyword in err_str for keyword in RETRYABLE_KEYWORDS):
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
 
 
 def live_devices():
@@ -227,60 +240,98 @@ def wait_for_all_devices(timeout_seconds: int = 300):
     wait_for_slices(slice_count=expected_slices, timeout_seconds=timeout_seconds)
 
 
+def _wait_for_full_scale(
+    desired_slices: int,
+    timeout_seconds: float,
+    poll_interval_seconds: float = 2.0,
+) -> int:
+    """Polls for `desired_slices` to become active within `timeout_seconds`."""
+    deadline = time.perf_counter() + max(0.0, timeout_seconds)
+    while True:
+        active_count = len(live_slice_indices())
+        if active_count >= desired_slices:
+            return active_count
+        now = time.perf_counter()
+        if now >= deadline:
+            return active_count
+        time.sleep(min(poll_interval_seconds, max(0.1, deadline - now)))
+
+
 def handle_preemption_recovery(
     elastic_manager: Any,
     required_slices: int = 1,
-    pause_timeout_seconds: int = 300,
+    desired_slices: Optional[int] = None,
+    pause_timeout_seconds: int = DEFAULT_PAUSE_RESUME_TIMEOUT_SECONDS,
+    detected_at: Optional[float] = None,
 ) -> int:
-    """Handles slice reconciliation after preemption: executes pause-and-resume or degraded continuation.
+    """Handles slice reconciliation after preemption: executes pause-and-resume or degraded continuation."""
+    if desired_slices is None:
+        desired_slices = max(required_slices, total_cluster_slices())
 
-    Args:
-        elastic_manager: The active Pathways Elastic Manager.
-        required_slices: Minimum slices required to run (defaults to 1).
-        pause_timeout_seconds: Timeout for pause-and-resume when live slices < required.
+    elapsed = (time.perf_counter() - detected_at) if detected_at is not None else 0.0
+    remaining_timeout = max(0.0, float(pause_timeout_seconds) - elapsed)
 
-    Returns:
-        The number of active slices ready for training.
-
-    Raises:
-        RuntimeError: If pause-and-resume times out waiting for required slices.
-    """
     active_indices = live_slice_indices()
     active_count = len(active_indices)
 
-    if active_count < required_slices:
+    if active_count < desired_slices and remaining_timeout > 0:
         logging.info(
-            "[ELASTIC] [PAUSE-AND-RESUME] Active slices (%d) < required threshold (%d). "
-            "Pausing in-memory and waiting up to %ds for slices to return...",
+            "[ELASTIC] [PAUSE-AND-RESUME] Active slices (%d) < desired full scale (%d) "
+            "(minimum required: %d). Pausing in-memory for up to %.1fs (of %ds budget) "
+            "for preempted slices to return...",
             active_count,
+            desired_slices,
             required_slices,
+            remaining_timeout,
             pause_timeout_seconds,
         )
-        record_elastic_wait_end_and_reinit_start()
-        try:
-            wait_for_slices(required_slices, timeout_seconds=pause_timeout_seconds)
-            logging.info("[ELASTIC] Slices recovered to %d! Resuming training from in-memory snapshot.", required_slices)
-            active_count = required_slices
-        except Exception as timeout_err:
-            logging.error(
-                "[ELASTIC] Preempted slices did not reach required threshold (%d) within %ds timeout. "
-                "Failing over to persistent checkpoint restart.",
-                required_slices,
-                pause_timeout_seconds,
+        active_count = _wait_for_full_scale(
+            desired_slices=desired_slices,
+            timeout_seconds=remaining_timeout,
+        )
+        if active_count >= desired_slices:
+            logging.info(
+                "[ELASTIC] [PAUSE-AND-RESUME] All %d slices recovered within timeout! "
+                "Resuming training at full scale from in-memory snapshot.",
+                active_count,
             )
-            raise RuntimeError(
-                f"Elastic pause-and-resume timed out waiting for {required_slices} slices. "
-                f"Restarting from persistent checkpoint."
-            ) from timeout_err
-    else:
+            wait_for_slices(active_count, timeout_seconds=max(30, int(remaining_timeout)))
+            if elastic_manager and hasattr(elastic_manager, "new_slice_event"):
+                elastic_manager.new_slice_event.clear()
+            record_elastic_wait_end_and_reinit_start()
+            return active_count
+        logging.warning(
+            "[ELASTIC] [PAUSE-AND-RESUME] Timeout (%ds) expired with %d/%d slices active.",
+            pause_timeout_seconds,
+            active_count,
+            desired_slices,
+        )
+
+    if active_count >= required_slices:
         logging.info(
-            "[ELASTIC] Active slices (%d) >= required threshold (%d). Proceeding with degraded recovery.",
+            "[ELASTIC] Active slices (%d) >= minimum required threshold (%d). "
+            "Proceeding with degraded recovery on %d slices from in-memory snapshot.",
             active_count,
             required_slices,
+            active_count,
         )
-        wait_for_slices(active_count, timeout_seconds=pause_timeout_seconds)
+        wait_for_slices(active_count, timeout_seconds=max(60, pause_timeout_seconds))
+        if elastic_manager and hasattr(elastic_manager, "new_slice_event"):
+            elastic_manager.new_slice_event.clear()
+        record_elastic_wait_end_and_reinit_start()
+        return active_count
 
-    return active_count
+    logging.error(
+        "[ELASTIC] Preempted slices (%d active) did not reach minimum required threshold (%d) "
+        "within %ds timeout. Failing over to persistent checkpoint restart.",
+        active_count,
+        required_slices,
+        pause_timeout_seconds,
+    )
+    raise RuntimeError(
+        f"Elastic pause-and-resume timed out with {active_count}/{required_slices} required slices "
+        f"after {pause_timeout_seconds}s. Restarting from persistent checkpoint."
+    )
 
 
 class ScaleUpRequest(Exception):
@@ -344,7 +395,6 @@ JAX_STATE_KEYS = frozenset({
 EXCLUDED_KEYS = frozenset({
     "_jax_device_state", "_python_vars", "_immutable_data"
 })
-RETRYABLE_KEYWORDS = ("data_loss", "unavailable", "unplaced", "slice down", "died")
 
 
 def safe_delete_arrays(pytree: Any) -> int:
@@ -632,9 +682,6 @@ def _slice_monitor_context(elastic_manager: Any, original_slices: int):
     finally:
         if monitor_thread is not None:
             logging.info("[ELASTIC] Stopping slice monitor thread...")
-            stop_monitor_event.set()
-            monitor_thread.join(timeout=5)
-            logging.info("[ELASTIC] Slice monitor thread stopped.")
             stop_monitor_event.set()
             monitor_thread.join(timeout=5)
             logging.info("[ELASTIC] Slice monitor thread stopped.")

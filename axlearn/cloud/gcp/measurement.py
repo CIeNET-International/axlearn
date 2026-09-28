@@ -37,6 +37,7 @@ from axlearn.common import measurement_base
 from axlearn.common.config import REQUIRED, Required, config_class, maybe_set_config
 
 
+@measurement_base.register_recorder("goodput_elastic")
 @measurement_base.register_recorder("goodput")
 class GoodputRecorder(measurement_base.Recorder):
     """Records overall training goodput."""

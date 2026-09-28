@@ -350,7 +350,7 @@ def get_trainer_kwargs(
             train_batch_size=len(jax.devices()),
             # train_batch_size=len(live_devices()),
             max_step=250_000,  # Most of the evals were done at 100k steps in the paper.
-            save_every_n_steps=20,
+            save_every_n_steps=100,
             mesh_shape=mesh_shape_from_axes(fsdp=-1, expert=16),
             mesh_rules=(
                 (
@@ -440,11 +440,14 @@ def get_trainer_kwargs(
                     ),
                 ),
                 (
-                    "tpu-7x-256",
+                    "tpu-v?7x-.*",
                     ChainConfigModifier.default_config().set(
                         config_modifiers=[
                             MeshShapeModifier.default_config().set(
-                                mesh_shape=mesh_shape_from_axes(data=-1, expert=16, fsdp=16)
+                                mesh_shape=HybridMeshShape(
+                                    ici_mesh_shape=mesh_shape_from_axes(fsdp=64, expert=16),
+                                    dcn_mesh_shape=mesh_shape_from_axes(pipeline=1, data=2),
+                                )
                             ),
                             # Ensure we set the default tpu_block_size=2048 on TPU 7x
                             V7xFlashConfigModifier.default_config(),

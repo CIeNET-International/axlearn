@@ -22,6 +22,22 @@ from axlearn.common.utils import Nested, TensorSpec, get_current_abstract_or_phy
 _logger = logging
 
 
+def _shard_index_key(index: Any) -> tuple:
+  """Normalizes a sharding index into a hashable key identifying a global-array region.
+
+  Both `jax.Array.addressable_shards[i].index` and the values of
+  `Sharding.addressable_devices_indices_map()` are tuples of `slice` objects
+  describing which region of the global array a shard holds. `slice` only became
+  hashable in Python 3.12, so normalize to plain tuples of ints so the keys can be
+  used in a dict on any supported interpreter.
+  """
+  if not isinstance(index, tuple):
+    index = (index,)
+  return tuple(
+      (i.start, i.stop, i.step) if isinstance(i, slice) else i for i in index
+  )
+
+
 class Snapshotter:
   """Manages asynchronous backups of JAX array states to pinned host memory."""
 
@@ -175,8 +191,8 @@ class Snapshotter:
     target_replicas = target_mesh.shape.get(mesh_axis_name, 1)
     _logger.info(
         "[ELASTIC][SCALE] _is_scale_down decision: target_total (%d) < source_total (%d)",
-        source_replicas,
         target_replicas,
+        source_replicas,
     )
     return target_replicas < source_replicas
 
@@ -216,6 +232,67 @@ class Snapshotter:
     jax.block_until_ready(restored_state)
     return restored_state
 
+  def _healthy_shards_by_region(self, x: jax.Array) -> dict:
+    """Returns one live shard per global-array region, skipping preempted slices.
+
+    On a 2 -> 2 pause-and-resume recovery `x.addressable_shards` still contains
+    handles for the slice that was preempted. Touching one of those raises
+    JaxRuntimeError (UNAVAILABLE / DATA_LOSS), so shards must be health checked
+    before being rebound onto the new mesh.
+
+    Probes a whole replica at a time where possible (one block_until_ready per
+    replica rather than per shard) and falls back to per-shard probing if the
+    mesh cannot be split along the replica axis.
+    """
+    by_region = {}
+    shards = getattr(x, "addressable_shards", [])
+
+    mesh = getattr(x.sharding, "mesh", None)
+    mesh_axis_name = mesh.axis_names[self.replica_axis_index] if mesh is not None else None
+    source_replicas = mesh.shape.get(mesh_axis_name, 1) if mesh is not None else 1
+
+    if source_replicas <= 1:
+      # Only one replica exists, so every shard is on the surviving slice.
+      # Skip probing entirely to keep the common 1 -> 2 scale-up path fast.
+      for shard in shards:
+        by_region.setdefault(_shard_index_key(shard.index), shard.data)
+      return by_region
+
+    try:
+      for replica in split_by_mesh_axis.split_by_mesh_axis(x, mesh_axis_name):
+        try:
+          jax.block_until_ready(replica)
+        except jax.errors.JaxRuntimeError:
+          continue
+        for shard in replica.addressable_shards:
+          by_region.setdefault(_shard_index_key(shard.index), shard.data)
+        if by_region:
+          _logger.info(
+              "[ELASTIC] Sourced %d shard region(s) from a healthy replica along '%s'.",
+              len(by_region),
+              mesh_axis_name,
+          )
+          return by_region
+    except Exception as e:  # pylint: disable=broad-except
+      _logger.warning(
+          "[ELASTIC] Replica-level health probe failed (%s); probing shards individually.", e
+      )
+
+    skipped = 0
+    for shard in shards:
+      key = _shard_index_key(shard.index)
+      if key in by_region:
+        continue
+      try:
+        jax.block_until_ready(shard.data)
+      except jax.errors.JaxRuntimeError:
+        skipped += 1
+        continue
+      by_region[key] = shard.data
+    if skipped:
+      _logger.info("[ELASTIC] Skipped %d shard handle(s) on preempted slice(s).", skipped)
+    return by_region
+
   def _restore_scale_up(
       self,
       pinned_state: tree_types.PyTree,
@@ -251,28 +328,40 @@ class Snapshotter:
       if target_sharding is not None and hasattr(target_sharding, "with_memory_kind"):
         target_sharding = target_sharding.with_memory_kind("device")
 
-      healthy_shards = []
-      if hasattr(x, "addressable_shards"):
-        for shard in x.addressable_shards:
-          healthy_shards.append(shard.data)
+      # Key each source shard by the region of the global array it holds rather than
+      # by its position in `addressable_shards`. Replica copies of the same region
+      # collapse onto a single key, which is exactly what we want: any one of them
+      # can feed every target device that covers that region. Shards belonging to a
+      # preempted slice are filtered out first.
+      src_by_region = self._healthy_shards_by_region(x)
 
-      if not healthy_shards:
+      if not src_by_region:
         return x
 
-      num_healthy = len(healthy_shards)
+      target_regions = target_sharding.addressable_devices_indices_map(tuple(spec.shape))
+      missing = {_shard_index_key(r) for r in target_regions.values()} - set(src_by_region)
+      if missing:
+        # Guessing a mapping here is what silently scrambled weights previously.
+        # Failing loudly falls back to the GCS checkpoint, which is slow but correct.
+        raise RuntimeError(
+            "[ELASTIC] Cannot rebind snapshot shards: %d target region(s) have no "
+            "counterpart in the snapshot (source regions: %d, target regions: %d). "
+            "Example missing region: %s"
+            % (len(missing), len(src_by_region), len(target_regions), sorted(missing)[0])
+        )
+
       device_shards = []
       dev_shard_cache = {}
-      for i, dev in enumerate(target_sharding.addressable_devices):
-        shard_idx = i % num_healthy
+      for dev in target_sharding.addressable_devices:
+        region_key = _shard_index_key(target_regions[dev])
         single_sharding = jax.sharding.SingleDeviceSharding(dev).with_memory_kind("device")
 
-        if shard_idx not in dev_shard_cache:
-          src_shard_data = healthy_shards[shard_idx]
-          dev_shard = jax.device_put(src_shard_data, single_sharding)
-          dev_shard_cache[shard_idx] = dev_shard
+        if region_key not in dev_shard_cache:
+          dev_shard = jax.device_put(src_by_region[region_key], single_sharding)
+          dev_shard_cache[region_key] = dev_shard
         else:
           # Prevents Pathways from cloning the host-pinned buffer across slices over DCN
-          dev_shard = jax.device_put(dev_shard_cache[shard_idx], single_sharding)
+          dev_shard = jax.device_put(dev_shard_cache[region_key], single_sharding)
         device_shards.append(dev_shard)
 
       return jax.make_array_from_single_device_arrays(spec.shape, target_sharding, device_shards)
@@ -379,6 +468,5 @@ class Snapshotter:
       _, step = self._latest_snapshot
     return training.CheckpointMetadata(
         step=step,
-        path=epath.Path(),
         metadata=None,
     )
