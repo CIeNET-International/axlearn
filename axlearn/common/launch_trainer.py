@@ -143,7 +143,7 @@ flags.DEFINE_string(
 )
 flags.DEFINE_integer(
     "num_elastic_slices",
-    1,
+    2,
     "Minimum number of active slices required to continue training without pausing.",
 )
 flags.DEFINE_integer(
