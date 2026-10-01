@@ -3,6 +3,7 @@
 """Manages asynchronous backups of JAX array states to pinned host memory."""
 
 from absl import logging
+import gc
 import os
 import queue
 import threading
@@ -20,6 +21,26 @@ from pathwaysutils.experimental import split_by_mesh_axis  # pytype: disable=imp
 from axlearn.common.utils import Nested, TensorSpec, get_current_abstract_or_physical_mesh
 
 _logger = logging
+
+
+def _free_pinned_host_arrays(tree: Any) -> int:
+  """Deletes host-pinned jax.Array leaves of a superseded snapshot.
+
+  Only `pinned_host` leaves are touched, so device-memory training state is never freed.
+  """
+  freed = 0
+  for leaf in jax.tree_util.tree_leaves(tree):
+    try:
+      if (
+          isinstance(leaf, jax.Array)
+          and getattr(leaf.sharding, "memory_kind", None) == "pinned_host"
+          and not leaf.is_deleted()
+      ):
+        leaf.delete()
+        freed += 1
+    except Exception:  # pylint: disable=broad-except
+      pass
+  return freed
 
 
 def _shard_index_key(index: Any) -> tuple:
@@ -58,6 +79,27 @@ class Snapshotter:
     self._worker_thread = threading.Thread(target=self._worker, daemon=True)
     self._worker_thread.start()
 
+  def evict(self) -> int:
+    """Synchronously waits for in-flight snapshot work and frees the cached pinned_host snapshot."""
+    self.join()
+    old_snapshot = None
+    with self._lock:
+      old_snapshot = self._latest_snapshot
+      self._latest_snapshot = None
+    if old_snapshot is None:
+      return 0
+    old_state, old_step = old_snapshot
+    old_snapshot = None
+    freed = _free_pinned_host_arrays(old_state)
+    del old_state
+    gc.collect()
+    _logger.info(
+        "[ELASTIC] [MEMFIX] Evicted snapshot step %d (freed %d pinned_host arrays).",
+        old_step,
+        freed,
+    )
+    return freed
+
   def _worker(self):
     while True:
       task = self._queue.get()
@@ -90,7 +132,12 @@ class Snapshotter:
         
         if old_snapshot is not None:
           old_state, old_step = old_snapshot
-          del old_state, old_snapshot
+          old_snapshot = None
+          # Explicitly free the superseded host-pinned snapshot so that
+          # stray Python references cannot keep its worker host memory alive.
+          freed = _free_pinned_host_arrays(old_state)
+          _logger.info("[ELASTIC] [MEMFIX] Freed %d pinned_host arrays of superseded snapshot step %d", freed, old_step)
+          del old_state
 
       except Exception as e:  # pylint: disable=broad-except
         err_msg = "Unknown error"
@@ -128,6 +175,10 @@ class Snapshotter:
         err = self._last_worker_error
         self._last_worker_error = None
         raise err
+
+    # Evict previous pinned_host snapshot BEFORE allocating new pinned_host buffers so two
+    # full copies of trainer state never coexist in worker DRAM.
+    self.evict()
 
     _logger.info("[ELASTIC] Moving snapshot state to host-pinned memory for step %d...", step)
     pinned_shardings = jax.tree.map(
@@ -449,8 +500,7 @@ class Snapshotter:
     _logger.info("[ELASTIC] [TIMING] TPU Device Loading took %.3f seconds", restore_time)
 
     if reset_snapshot_state:
-      with self._lock:
-        self._latest_snapshot = None
+      self.evict()
 
     return restored_state
 

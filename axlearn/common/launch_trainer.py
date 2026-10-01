@@ -407,6 +407,9 @@ def run_trainer(trainer_config: SpmdTrainer.Config) -> Any:
                         
                         with (recovery_timer.time_subtask("3_snapshot_restore_and_hardware_barrier") if recovery_timer else contextlib.nullcontext()):
                             trainer, prng_key = sync_restore_class_vars(clean_trainer, jax_device_state, python_vars, immutable_data)
+                        # The restored trainer's snapshot_mgr now owns the snapshot. Drop the
+                        # loop-level reference so the superseded snapshot can be freed after the next save.
+                        python_vars.pop("_latest_snapshot", None)
                         
                         if "_elastic_reinit_start_time" in python_vars:
                             trainer._elastic_reinit_start_time = python_vars.pop("_elastic_reinit_start_time")

@@ -98,6 +98,25 @@ class TrainerState(NamedTuple):
     learner: Union[NestedTensor, Nested[TensorSpec], Nested[jax.sharding.NamedSharding]]
 
 
+def _elastic_ckpt_save_in_progress(checkpointer) -> bool:
+    """Best-effort: True while an async (Orbax) checkpoint save is still running."""
+    mgr = getattr(checkpointer, "_manager", None)
+    if mgr is None:
+        return False
+    fn = getattr(mgr, "is_saving_in_progress", None)
+    if callable(fn):
+        try:
+            return bool(fn())
+        except Exception:  # pylint: disable=broad-except
+            pass
+    t = getattr(mgr, "_finalize_thread", None)
+    try:
+        t = t.get() if hasattr(t, "get") else t
+    except Exception:  # pylint: disable=broad-except
+        t = None
+    return bool(t is not None and hasattr(t, "is_alive") and t.is_alive())
+
+
 # pylint: disable-next=too-many-instance-attributes
 class SpmdTrainer(Module):
     """A trainer implementation that supports partitioning of computation and data with GSPMD."""
@@ -939,13 +958,34 @@ class SpmdTrainer(Module):
                                     return ScaleUpSignal()
 
                                 snapshot_interval = getattr(cfg, "elastic_snapshot_every_n_steps", 5)
-                                if restore_mode == "snapshot" and snapshot_interval and snapshot_interval > 0 and self.step % snapshot_interval == 0:
-                                    ckpt_every_n = getattr(getattr(cfg.checkpointer, "save_policy", None), "n", None)
+                                ckpt_every_n = getattr(getattr(cfg.checkpointer, "save_policy", None), "n", None)
+                                if restore_mode == "snapshot" and ckpt_every_n and (self.step + 1) % ckpt_every_n == 0:
+                                    snapshot_mgr = getattr(self, "snapshot_mgr", None)
+                                    if snapshot_mgr is not None and hasattr(snapshot_mgr, "evict"):
+                                        freed = snapshot_mgr.evict()
+                                        logging.info(
+                                            "[ELASTIC] [MEMFIX] Step %s precedes checkpoint step %s; pre-evicted snapshot (%d arrays freed).",
+                                            self.step,
+                                            self.step + 1,
+                                            freed,
+                                        )
+                                    if hasattr(self, "_python_vars") and isinstance(self._python_vars, dict):
+                                        self._python_vars.pop("_latest_snapshot", None)
+                                    if hasattr(self, "_jax_device_state") and isinstance(self._jax_device_state, dict):
+                                        self._jax_device_state.pop("_trainer_state", None)
+                                elif restore_mode == "snapshot" and snapshot_interval and snapshot_interval > 0 and self.step % snapshot_interval == 0:
                                     if ckpt_every_n and self.step % ckpt_every_n == 0:
                                         logging.info(
                                             "[ELASTIC] Step %s is a checkpoint step (every %s). Skipping snapshot to bound host memory.",
                                             self.step,
                                             ckpt_every_n,
+                                        )
+                                    elif _elastic_ckpt_save_in_progress(self.checkpointer):
+                                        # Snapshot D2H copies issued while an async GCS checkpoint save is still
+                                        # committing leave a lasting step-time regression (A/B 2026-10-01).
+                                        logging.info(
+                                            "[ELASTIC] Step %s: async checkpoint save still in progress. Deferring snapshot.",
+                                            self.step,
                                         )
                                     else:
                                         self._jax_device_state, self._python_vars, self._immutable_data = sync_store_class_vars(self)
@@ -1371,9 +1411,21 @@ class SpmdTrainer(Module):
                     else self._input_iter
                 )
             try:
+                step_int = int(self.step) if self.step is not None else 0
+                ckpt_every_n = getattr(getattr(cfg.checkpointer, "save_policy", None), "n", None)
+                if ckpt_every_n and step_int > 0 and step_int % ckpt_every_n == 0:
+                    snapshot_mgr = getattr(self, "snapshot_mgr", None)
+                    if snapshot_mgr is not None and hasattr(snapshot_mgr, "evict"):
+                        freed = snapshot_mgr.evict()
+                        if freed:
+                            logging.info(
+                                "[ELASTIC] [MEMFIX] Evicted %d pinned_host arrays before checkpoint save at step %d.",
+                                freed,
+                                step_int,
+                            )
                 t_sync_save = time.perf_counter()
                 self.checkpointer.save(
-                    step=int(self.step) if self.step is not None else 0, state=ckpt_state, evaler_summaries=evaler_summaries
+                    step=step_int, state=ckpt_state, evaler_summaries=evaler_summaries
                 )
                 logging.info(
                     "[TIMING] Sync checkpoint save took %.3f seconds",

@@ -462,7 +462,7 @@ def sync_restore_class_vars(
     old_state = jax_device_state.pop("_trainer_state", None) if jax_device_state else None
 
     state_restored = False
-    latest_snapshot = python_vars.get("_latest_snapshot")
+    latest_snapshot = python_vars.pop("_latest_snapshot", None)
     if latest_snapshot is not None:
         logging.info("[ELASTIC] Found raw host-pinned _latest_snapshot. Instantiating fresh Snapshotter.")
         from axlearn.common.config import config_for_class
@@ -474,6 +474,7 @@ def sync_restore_class_vars(
         )
         snapshot_mgr = snapshot_cfg.instantiate()
         snapshot_mgr._latest_snapshot = latest_snapshot
+        latest_snapshot = None
     else:
         snapshot_mgr = python_vars.get("snapshot_mgr")
 
@@ -500,6 +501,8 @@ def sync_restore_class_vars(
                         fresh_trainer._step = int(snapshot_mgr.latest.step)
                     except Exception as e:
                         logging.warning("Failed to extract step from snapshot_mgr.latest: %s", e)
+                if hasattr(snapshot_mgr, "evict"):
+                    snapshot_mgr.evict()
                 logging.info("[ELASTIC] Successfully restored state from snapshot onto new mesh.")
                 state_restored = True
             except Exception as e:
@@ -586,6 +589,9 @@ def sync_store_class_vars(obj: Any) -> tuple[dict, dict, dict]:
                 step=int(step_val) if step_val is not None else 0,
                 state=jax_device_state["_trainer_state"],
             )
+            # Do not keep a duplicate Python reference to _trainer_state in jax_device_state once
+            # snapshot_mgr holds the host-pinned snapshot.
+            jax_device_state.pop("_trainer_state", None)
         except Exception as e:
             err_str = str(e).lower()
             if isinstance(e, jax.errors.JaxRuntimeError) or any(k in err_str for k in RETRYABLE_KEYWORDS):
