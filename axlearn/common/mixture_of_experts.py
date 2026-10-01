@@ -1624,19 +1624,6 @@ class TransformerFeedForwardMoE(DenseGeneralBaseLayer):
         input_dtype = x.dtype
         cfg = self.config
         outer_batch = cfg.outer_batch
-        try:
-            from jax._src import mesh as mesh_lib
-            env_mesh = mesh_lib.thread_resources.env.physical_mesh
-            if not env_mesh.empty and "data" in env_mesh.axis_names:
-                data_size = int(env_mesh.shape["data"])
-                seq_size = int(env_mesh.shape.get("seq", 1))
-                dynamic_outer = max(1, data_size * seq_size)
-                if x.shape[0] % dynamic_outer == 0:
-                    outer_batch = dynamic_outer
-        except Exception:
-            pass
-        if x.shape[0] % outer_batch != 0:
-            outer_batch = 1
         if x.shape[0] % outer_batch != 0:
             raise ValueError(
                 f"batch_size {x.shape[0]} has to be divisible by outer_batch {outer_batch}."
